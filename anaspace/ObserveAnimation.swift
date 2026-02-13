@@ -10,7 +10,7 @@ extension ObserveAnimation {
         var outboundPulseInterval: Float = 1.0 // seconds between pulses
         var inboundSpeed: Float = 35.0         // distance units per second
         var inboundBandWidth: Float = 5.0      // distance units
-        var chaos: Float = 0.35                // glyph re-randomization rate
+        var chaos: Float = 0.08                 // glyph re-randomization rate (low = persistent)
         var interferenceChaos: Float = 0.85    // chaos boost during interference
         var redAccentChance: Float = 0.003     // per-cell per-frame red chance
         var duration: Float = 10.0             // total animation seconds
@@ -64,6 +64,7 @@ final class ObserveAnimation {
     private var cols: Int = 0
     private var rows: Int = 0
     private var maxDistance: Float = 0
+    private var colScale: Float = 1.0      // aspect ratio correction for perfect circles
 
     // Active waves
     private var outboundWaves: [OutboundWave] = []
@@ -110,9 +111,18 @@ final class ObserveAnimation {
     // MARK: - Precompute
 
     private func precompute() {
+        guard let grid else { return }
         let originCol: Float = Float(cols) / 2.0
         let originRow: Float = Float(rows) - 1.0
         let totalCells = rows * cols
+
+        // Compute aspect ratio so waves render as perfect circles on screen
+        if let metrics = grid.metrics {
+            let gridWidth = grid.bounds.width - 2 * GridMetrics.sideMargin
+            let cellWidth = Float(gridWidth / CGFloat(cols))
+            let cellHeight = Float(metrics.lineHeight)
+            colScale = cellWidth / cellHeight
+        }
 
         distances = [Float](repeating: 0, count: totalCells)
         cellSeeds = (0..<totalCells).map { _ in UInt32.random(in: 0...UInt32.max) }
@@ -120,7 +130,7 @@ final class ObserveAnimation {
 
         for row in 0..<rows {
             for col in 0..<cols {
-                let dx = Float(col) - originCol
+                let dx = (Float(col) - originCol) * colScale
                 let dy = Float(row) - originRow
                 let dist = sqrtf(dx * dx + dy * dy)
                 distances[row * cols + col] = dist
@@ -189,23 +199,27 @@ final class ObserveAnimation {
                 var inResult: CellResult?
 
                 // Check outbound waves
-                for wave in outboundWaves {
+                var outWaveId: UInt32 = 0
+                for (i, wave) in outboundWaves.enumerated() {
                     let wavefront = (elapsed - wave.spawnTime) * config.outboundSpeed
                     let offset = dist - wavefront
                     if abs(offset) <= halfOutband {
-                        outResult = evaluateOutbound(offset: offset, halfBand: halfOutband, seed: seed)
+                        outWaveId = UInt32(i) &+ UInt32(bitPattern: Int32(wave.spawnTime * 100))
+                        outResult = evaluateOutbound(offset: offset, halfBand: halfOutband, seed: seed, waveId: outWaveId)
                         break
                     }
                 }
 
                 // Check inbound waves
-                for wave in inboundWaves {
+                var inWaveId: UInt32 = 0
+                for (i, wave) in inboundWaves.enumerated() {
                     let wavefront = maxDistance - (elapsed - wave.spawnTime) * config.inboundSpeed
                     let penetration = wave.amplitude * maxDistance
                     // Wave only reaches cells within penetration depth from edge
                     if dist < (maxDistance - penetration) { continue }
                     let offset = dist - wavefront
                     if abs(offset) <= halfInband {
+                        inWaveId = UInt32(i) &+ UInt32(bitPattern: Int32(wave.spawnTime * 100)) &+ 0xFF00
                         inResult = evaluateInbound(offset: offset, halfBand: halfInband, amplitude: wave.amplitude, seed: seed)
                         break
                     }
@@ -213,21 +227,38 @@ final class ObserveAnimation {
 
                 // Compose result
                 if let outR = outResult, let inR = inResult {
-                    // Interference
-                    let state = evaluateInterference(seed: seed)
-                    states[col] = state
-                    rowDirty = true
-                    _ = (outR, inR) // suppress unused warnings
+                    // Both waves present - check for core intersection (narrow band)
+                    if outR.isCore && inR.isCore {
+                        // Interference: flash both to bold color where center lines cross
+                        let tier = max(outR.tier, inR.tier)
+                        let glyph = pickGlyph(tier: tier, seed: seed, chaos: config.chaos, isInterference: false)
+                        states[col] = CellState(character: glyph, color: .bold, bold: true)
+                        rowDirty = true
+                    } else if outR.isCore || outR.tier >= inR.tier {
+                        // Outbound dominates outside core intersection
+                        if shouldFill(chance: outR.fillChance, seed: seed, waveId: outWaveId) {
+                            let glyph = pickGlyph(tier: outR.tier, seed: seed, chaos: config.chaos, isInterference: false)
+                            states[col] = CellState(character: glyph, color: outR.color, bold: false)
+                            rowDirty = true
+                        }
+                    } else {
+                        // Inbound dominates
+                        if shouldFill(chance: inR.fillChance, seed: seed, waveId: inWaveId) {
+                            let glyph = pickGlyph(tier: inR.tier, seed: seed, chaos: config.chaos, isInterference: false)
+                            states[col] = CellState(character: glyph, color: .highlight, bold: false)
+                            rowDirty = true
+                        }
+                    }
                 } else if let outR = outResult {
-                    if shouldFill(chance: outR.fillChance, seed: seed) {
+                    if shouldFill(chance: outR.fillChance, seed: seed, waveId: outWaveId) {
                         let glyph = pickGlyph(tier: outR.tier, seed: seed, chaos: config.chaos, isInterference: false)
-                        states[col] = CellState(character: glyph, color: outR.color, bold: outR.tier >= 4)
+                        states[col] = CellState(character: glyph, color: outR.color, bold: false)
                         rowDirty = true
                     }
                 } else if let inR = inResult {
-                    if shouldFill(chance: inR.fillChance, seed: seed) {
+                    if shouldFill(chance: inR.fillChance, seed: seed, waveId: inWaveId) {
                         let glyph = pickGlyph(tier: inR.tier, seed: seed, chaos: config.chaos, isInterference: false)
-                        states[col] = CellState(character: glyph, color: .highlight, bold: inR.tier >= 4)
+                        states[col] = CellState(character: glyph, color: .highlight, bold: false)
                         rowDirty = true
                     }
                 }
@@ -249,53 +280,56 @@ final class ObserveAnimation {
         var tier: Int         // 1-5
         var fillChance: Float
         var color: GridColor
+        var isCore: Bool = false
     }
 
-    private func evaluateOutbound(offset: Float, halfBand: Float, seed: UInt32) -> CellResult {
+    private func evaluateOutbound(offset: Float, halfBand: Float, seed: UInt32, waveId: UInt32) -> CellResult {
         let absOffset = abs(offset)
 
-        if absOffset > 3.5 {
-            // Leading/trailing edge - sparse, tint color
-            return CellResult(tier: 1, fillChance: 0.30, color: .tint)
-        } else if absOffset > 2.0 {
-            // Near edge - light, tint color
-            return CellResult(tier: 2, fillChance: 0.60, color: .tint)
+        // Color: equal mix of bold and tint throughout, with rare red accent
+        let isRed = hashFloat(seed, frameSeed) < config.redAccentChance
+        let color: GridColor
+        if isRed {
+            color = .focus
         } else {
-            // Core - dense, bold color with rare red accent
-            let isRed = hashFloat(seed, frameSeed) < config.redAccentChance
-            let color: GridColor = isRed ? .focus : .bold
-            let tier = hashFloat(seed, frameSeed &+ 99) > 0.5 ? 5 : 4
-            return CellResult(tier: tier, fillChance: 0.95, color: color)
+            color = hashFloat(seed, waveId &+ 0x4C01) < 0.5 ? .bold : .tint
+        }
+
+        if absOffset > 3.5 {
+            // Far edge - minimal, sparse
+            return CellResult(tier: 1, fillChance: 0.25, color: color, isCore: false)
+        } else if absOffset > 2.5 {
+            // Near edge - light
+            return CellResult(tier: 1, fillChance: 0.45, color: color, isCore: false)
+        } else if absOffset > 1.5 {
+            // Mid band - moderate
+            return CellResult(tier: 2, fillChance: 0.65, color: color, isCore: false)
+        } else {
+            // Core - medium density (not heavy)
+            return CellResult(tier: 3, fillChance: 0.85, color: color, isCore: true)
         }
     }
 
     private func evaluateInbound(offset: Float, halfBand: Float, amplitude: Float, seed: UInt32) -> CellResult {
         let absOffset = abs(offset)
 
-        // Determine max tier from amplitude
+        // Lighter inbound: tier 1-3 max, similar weight to outbound
         let maxTier: Int
-        if amplitude >= 0.8 { maxTier = 5 }
-        else if amplitude >= 0.6 { maxTier = 4 }
-        else if amplitude >= 0.4 { maxTier = 3 }
-        else if amplitude >= 0.2 { maxTier = 2 }
+        if amplitude >= 0.6 { maxTier = 3 }
+        else if amplitude >= 0.3 { maxTier = 2 }
         else { maxTier = 1 }
 
         if absOffset > 1.5 {
-            // Outer edge
-            return CellResult(tier: 1, fillChance: 0.25 * amplitude, color: .highlight)
+            // Far edge - minimal
+            return CellResult(tier: 1, fillChance: 0.20 * amplitude, color: .highlight, isCore: false)
         } else if absOffset > 0.5 {
-            // Inner edge
-            let tier = min(maxTier, 3)
-            return CellResult(tier: tier, fillChance: 0.50 * amplitude, color: .highlight)
+            // Near edge
+            let tier = min(maxTier, 2)
+            return CellResult(tier: tier, fillChance: 0.40 * amplitude, color: .highlight, isCore: false)
         } else {
             // Core
-            return CellResult(tier: maxTier, fillChance: 0.80 * amplitude, color: .highlight)
+            return CellResult(tier: maxTier, fillChance: 0.70 * amplitude, color: .highlight, isCore: true)
         }
-    }
-
-    private func evaluateInterference(seed: UInt32) -> CellState {
-        let glyph = pickGlyph(tier: 0, seed: seed, chaos: config.interferenceChaos, isInterference: true)
-        return CellState(character: glyph, color: .bold, bold: true)
     }
 
     // MARK: - Glyph Selection with Chaos
@@ -312,8 +346,9 @@ final class ObserveAnimation {
         return pool[index]
     }
 
-    private func shouldFill(chance: Float, seed: UInt32) -> Bool {
-        return hashFloat(seed, frameSeed) < chance
+    private func shouldFill(chance: Float, seed: UInt32, waveId: UInt32) -> Bool {
+        // Use waveId instead of frameSeed so fill pattern is stable per wave
+        return hashFloat(seed, waveId) < chance
     }
 
     // MARK: - Amplitude Sampling
