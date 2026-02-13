@@ -28,9 +28,14 @@ struct ContentView: View {
                     populateGrid(grid)
                 }
 
-                BottomNavBar()
+                BottomNavBar(onObserveTap: {
+                    controller.triggerObserve { grid in
+                        populateGrid(grid)
+                    }
+                })
                     .frame(height: GridMetrics.bottomFooter)
             }
+            .ignoresSafeArea()
         }
         .statusBarHidden()
     }
@@ -44,31 +49,14 @@ struct ContentView: View {
     // MARK: - Structure Layer
 
     private func fillStructureLayer(_ grid: CharacterGrid) {
-        // Tiled pattern: rectangular blocks separated by dividers
-        // Creates a woven graph-paper texture
-        let blockW = 4
-        let blockH = 3
+        // Uniform light-shade grid creating a subtle fabric texture
         let cols = GridMetrics.columns
 
         for row in 0..<grid.rowCount {
             for col in 0..<cols {
-                let ch: Character
-                let isRowDivider = row % (blockH + 1) == 0
-                let isColDivider = col % (blockW + 1) == 0
-
-                if isRowDivider && isColDivider {
-                    ch = "+"
-                } else if isRowDivider {
-                    ch = "-"
-                } else if isColDivider {
-                    ch = "|"
-                } else {
-                    ch = "."
-                }
-
                 grid.setCell(
                     layer: .structure, row: row, col: col,
-                    state: CellState(character: ch, color: .structure, bold: false)
+                    state: CellState(character: "\u{2591}", color: .tint, bold: false)
                 )
             }
         }
@@ -88,14 +76,14 @@ struct ContentView: View {
         // Dot character
         grid.setCell(
             layer: .content, row: centerRow, col: startCol,
-            state: CellState(character: "\u{25CF}", color: .accent, bold: true)
+            state: CellState(character: "\u{25CF}", color: .focus, bold: true)
         )
 
         // Text after dot + space
         for (i, ch) in text.enumerated() {
             grid.setCell(
                 layer: .content, row: centerRow, col: startCol + 2 + i,
-                state: CellState(character: ch, color: .content, bold: false)
+                state: CellState(character: ch, color: .bold, bold: false)
             )
         }
     }
@@ -104,7 +92,9 @@ struct ContentView: View {
 // MARK: - Bottom Nav Bar
 
 struct BottomNavBar: View {
-    private let navDark = GridColor.navDark.uiColor.swiftUI
+    var onObserveTap: () -> Void = {}
+
+    private let navDark = GridColor.bold.uiColor.swiftUI
     private let bg = GridColor.background.uiColor.swiftUI
 
     var body: some View {
@@ -135,6 +125,9 @@ struct BottomNavBar: View {
                                 .frame(width: 62, height: 62)
                         )
                 )
+                .onTapGesture {
+                    onObserveTap()
+                }
 
             Spacer()
 

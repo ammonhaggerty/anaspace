@@ -23,7 +23,7 @@ final class CascadeAnimation {
                 // Fill transition layer row with random glyphs
                 let states = (0..<cols).map { _ -> CellState in
                     let glyph = Self.transitionGlyphs.randomElement()!
-                    return CellState(character: glyph, color: .structure, bold: false)
+                    return CellState(character: glyph, color: .tint, bold: false)
                 }
 
                 DispatchQueue.main.async {

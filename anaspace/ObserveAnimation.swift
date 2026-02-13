@@ -1,0 +1,370 @@
+import UIKit
+
+// MARK: - Configuration
+
+extension ObserveAnimation {
+
+    struct Config {
+        var outboundSpeed: Float = 17.5        // distance units per second
+        var outboundBandWidth: Float = 9.0     // distance units
+        var outboundPulseInterval: Float = 1.0 // seconds between pulses
+        var inboundSpeed: Float = 35.0         // distance units per second
+        var inboundBandWidth: Float = 5.0      // distance units
+        var chaos: Float = 0.35                // glyph re-randomization rate
+        var interferenceChaos: Float = 0.85    // chaos boost during interference
+        var redAccentChance: Float = 0.003     // per-cell per-frame red chance
+        var duration: Float = 10.0             // total animation seconds
+    }
+}
+
+// MARK: - Wave Types
+
+private struct OutboundWave {
+    var spawnTime: Float
+}
+
+private struct InboundWave {
+    var spawnTime: Float
+    var amplitude: Float   // amplitude at spawn time
+}
+
+// MARK: - Glyph Pools
+
+private let tier1Glyphs: [Character] = Array("\u{00B7}\u{02D9}'\u{0060},.")
+private let tier2Glyphs: [Character] = Array("-~\u{00B0}\u{00AF}\u{2013}\u{00B7}")
+private let tier3Glyphs: [Character] = Array("+*#\u{00D7}=\u{2591}\u{253C}")
+private let tier4Glyphs: [Character] = Array("\u{2592}\u{2593}\u{256C}\u{2560}\u{2563}\u{2501}\u{2590}\u{258C}")
+private let tier5Glyphs: [Character] = Array("\u{2588}\u{2587}\u{2586}\u{2589}\u{258A}\u{258B}\u{258D}\u{258E}")
+private let interferenceGlyphs: [Character] = Array("\u{2573}\u{25C6}\u{25CF}\u{25CB}\u{25C9}\u{2295}\u{2297}\u{25CA}")
+
+private let allTiers: [[Character]] = [tier1Glyphs, tier2Glyphs, tier3Glyphs, tier4Glyphs, tier5Glyphs]
+
+// MARK: - Amplitude Keyframes
+
+private let amplitudeKeyframes: [(time: Float, value: Float)] = [
+    (0.0, 0.05), (1.0, 0.15), (1.5, 0.55), (3.0, 0.65),
+    (3.3, 0.90), (4.0, 0.50), (5.5, 0.60), (6.0, 0.30),
+    (6.5, 0.85), (8.0, 0.78), (8.5, 0.95), (9.5, 0.40), (10.0, 0.10)
+]
+
+// MARK: - ObserveAnimation
+
+final class ObserveAnimation {
+
+    var config = Config()
+
+    private weak var grid: CharacterGrid?
+    private var displayLink: CADisplayLink?
+    private var startTime: CFTimeInterval = 0
+    private var completion: (() -> Void)?
+
+    // Precomputed
+    private var distances: [Float] = []    // [row * cols + col]
+    private var cellSeeds: [UInt32] = []   // per-cell random seeds
+    private var cols: Int = 0
+    private var rows: Int = 0
+    private var maxDistance: Float = 0
+
+    // Active waves
+    private var outboundWaves: [OutboundWave] = []
+    private var inboundWaves: [InboundWave] = []
+    private var nextOutboundSpawn: Float = 0
+    private var nextInboundSpawn: Float = 0
+    private var frameSeed: UInt32 = 0
+
+    // MARK: - Public
+
+    func run(on grid: CharacterGrid, completion: @escaping () -> Void) {
+        stop()
+
+        self.grid = grid
+        self.completion = completion
+        self.cols = GridMetrics.columns
+        self.rows = grid.rowCount
+
+        precompute()
+
+        outboundWaves = [OutboundWave(spawnTime: 0)]
+        inboundWaves = []
+        nextOutboundSpawn = config.outboundPulseInterval
+        nextInboundSpawn = 0.5
+        frameSeed = 0
+
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        startTime = 0
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func stop() {
+        displayLink?.invalidate()
+        displayLink = nil
+        if let grid {
+            grid.clearLayer(.transition)
+            grid.render()
+        }
+        grid = nil
+    }
+
+    // MARK: - Precompute
+
+    private func precompute() {
+        let originCol: Float = Float(cols) / 2.0
+        let originRow: Float = Float(rows) - 1.0
+        let totalCells = rows * cols
+
+        distances = [Float](repeating: 0, count: totalCells)
+        cellSeeds = (0..<totalCells).map { _ in UInt32.random(in: 0...UInt32.max) }
+        maxDistance = 0
+
+        for row in 0..<rows {
+            for col in 0..<cols {
+                let dx = Float(col) - originCol
+                let dy = Float(row) - originRow
+                let dist = sqrtf(dx * dx + dy * dy)
+                distances[row * cols + col] = dist
+                if dist > maxDistance { maxDistance = dist }
+            }
+        }
+    }
+
+    // MARK: - Frame Loop
+
+    @objc private func tick(_ link: CADisplayLink) {
+        guard let grid else { stop(); return }
+
+        if startTime == 0 { startTime = link.timestamp }
+        let elapsed = Float(link.timestamp - startTime)
+
+        if elapsed >= config.duration {
+            displayLink?.invalidate()
+            displayLink = nil
+            grid.clearLayer(.transition)
+            grid.render()
+            self.grid = nil
+            completion?()
+            completion = nil
+            return
+        }
+
+        frameSeed &+= 1
+
+        // --- Spawn / prune outbound waves ---
+        if elapsed >= nextOutboundSpawn {
+            outboundWaves.append(OutboundWave(spawnTime: elapsed))
+            nextOutboundSpawn = elapsed + config.outboundPulseInterval
+        }
+        let outboundCycleMax = maxDistance + config.outboundBandWidth / 2.0
+        outboundWaves.removeAll { (elapsed - $0.spawnTime) * config.outboundSpeed > outboundCycleMax }
+
+        // --- Sample amplitude ---
+        let amplitude = sampleAmplitude(at: elapsed)
+
+        // --- Spawn / prune inbound waves ---
+        let spawnInterval = inboundSpawnInterval(for: amplitude)
+        if elapsed >= nextInboundSpawn {
+            inboundWaves.append(InboundWave(spawnTime: elapsed, amplitude: amplitude))
+            nextInboundSpawn = elapsed + spawnInterval
+        }
+        inboundWaves.removeAll { wave in
+            let wavefront = maxDistance - (elapsed - wave.spawnTime) * config.inboundSpeed
+            return wavefront < -config.inboundBandWidth / 2.0
+        }
+
+        // --- Evaluate cells row by row ---
+        let halfOutband = config.outboundBandWidth / 2.0
+        let halfInband = config.inboundBandWidth / 2.0
+
+        for row in 0..<rows {
+            var states = [CellState](repeating: .empty, count: cols)
+            var rowDirty = false
+
+            for col in 0..<cols {
+                let idx = row * cols + col
+                let dist = distances[idx]
+                let seed = cellSeeds[idx]
+
+                var outResult: CellResult?
+                var inResult: CellResult?
+
+                // Check outbound waves
+                for wave in outboundWaves {
+                    let wavefront = (elapsed - wave.spawnTime) * config.outboundSpeed
+                    let offset = dist - wavefront
+                    if abs(offset) <= halfOutband {
+                        outResult = evaluateOutbound(offset: offset, halfBand: halfOutband, seed: seed)
+                        break
+                    }
+                }
+
+                // Check inbound waves
+                for wave in inboundWaves {
+                    let wavefront = maxDistance - (elapsed - wave.spawnTime) * config.inboundSpeed
+                    let penetration = wave.amplitude * maxDistance
+                    // Wave only reaches cells within penetration depth from edge
+                    if dist < (maxDistance - penetration) { continue }
+                    let offset = dist - wavefront
+                    if abs(offset) <= halfInband {
+                        inResult = evaluateInbound(offset: offset, halfBand: halfInband, amplitude: wave.amplitude, seed: seed)
+                        break
+                    }
+                }
+
+                // Compose result
+                if let outR = outResult, let inR = inResult {
+                    // Interference
+                    let state = evaluateInterference(seed: seed)
+                    states[col] = state
+                    rowDirty = true
+                    _ = (outR, inR) // suppress unused warnings
+                } else if let outR = outResult {
+                    if shouldFill(chance: outR.fillChance, seed: seed) {
+                        let glyph = pickGlyph(tier: outR.tier, seed: seed, chaos: config.chaos, isInterference: false)
+                        states[col] = CellState(character: glyph, color: outR.color, bold: outR.tier >= 4)
+                        rowDirty = true
+                    }
+                } else if let inR = inResult {
+                    if shouldFill(chance: inR.fillChance, seed: seed) {
+                        let glyph = pickGlyph(tier: inR.tier, seed: seed, chaos: config.chaos, isInterference: false)
+                        states[col] = CellState(character: glyph, color: .highlight, bold: inR.tier >= 4)
+                        rowDirty = true
+                    }
+                }
+            }
+
+            if rowDirty {
+                grid.setRow(layer: .transition, row: row, states: states)
+            } else {
+                grid.clearRow(layer: .transition, row: row)
+            }
+        }
+
+        grid.render()
+    }
+
+    // MARK: - Cell Evaluation
+
+    private struct CellResult {
+        var tier: Int         // 1-5
+        var fillChance: Float
+        var color: GridColor
+    }
+
+    private func evaluateOutbound(offset: Float, halfBand: Float, seed: UInt32) -> CellResult {
+        let absOffset = abs(offset)
+
+        if absOffset > 3.5 {
+            // Leading/trailing edge - sparse, tint color
+            return CellResult(tier: 1, fillChance: 0.30, color: .tint)
+        } else if absOffset > 2.0 {
+            // Near edge - light, tint color
+            return CellResult(tier: 2, fillChance: 0.60, color: .tint)
+        } else {
+            // Core - dense, bold color with rare red accent
+            let isRed = hashFloat(seed, frameSeed) < config.redAccentChance
+            let color: GridColor = isRed ? .focus : .bold
+            let tier = hashFloat(seed, frameSeed &+ 99) > 0.5 ? 5 : 4
+            return CellResult(tier: tier, fillChance: 0.95, color: color)
+        }
+    }
+
+    private func evaluateInbound(offset: Float, halfBand: Float, amplitude: Float, seed: UInt32) -> CellResult {
+        let absOffset = abs(offset)
+
+        // Determine max tier from amplitude
+        let maxTier: Int
+        if amplitude >= 0.8 { maxTier = 5 }
+        else if amplitude >= 0.6 { maxTier = 4 }
+        else if amplitude >= 0.4 { maxTier = 3 }
+        else if amplitude >= 0.2 { maxTier = 2 }
+        else { maxTier = 1 }
+
+        if absOffset > 1.5 {
+            // Outer edge
+            return CellResult(tier: 1, fillChance: 0.25 * amplitude, color: .highlight)
+        } else if absOffset > 0.5 {
+            // Inner edge
+            let tier = min(maxTier, 3)
+            return CellResult(tier: tier, fillChance: 0.50 * amplitude, color: .highlight)
+        } else {
+            // Core
+            return CellResult(tier: maxTier, fillChance: 0.80 * amplitude, color: .highlight)
+        }
+    }
+
+    private func evaluateInterference(seed: UInt32) -> CellState {
+        let glyph = pickGlyph(tier: 0, seed: seed, chaos: config.interferenceChaos, isInterference: true)
+        return CellState(character: glyph, color: .bold, bold: true)
+    }
+
+    // MARK: - Glyph Selection with Chaos
+
+    private func pickGlyph(tier: Int, seed: UInt32, chaos: Float, isInterference: Bool) -> Character {
+        let pool = isInterference ? interferenceGlyphs : allTiers[max(0, min(4, tier - 1))]
+
+        // Quantized epoch: lower chaos = glyphs change less often
+        let changeRate = max(1, Int((1.0 - chaos) * 20.0) + 1)
+        let epoch = UInt32(frameSeed / UInt32(changeRate))
+
+        let h = hash(seed, epoch)
+        let index = Int(h) % pool.count
+        return pool[index]
+    }
+
+    private func shouldFill(chance: Float, seed: UInt32) -> Bool {
+        return hashFloat(seed, frameSeed) < chance
+    }
+
+    // MARK: - Amplitude Sampling
+
+    private func sampleAmplitude(at t: Float) -> Float {
+        let keyframes = amplitudeKeyframes
+
+        // Find surrounding keyframes
+        if t <= keyframes[0].time { return keyframes[0].value }
+        if t >= keyframes[keyframes.count - 1].time { return keyframes[keyframes.count - 1].value }
+
+        for i in 0..<keyframes.count - 1 {
+            if t >= keyframes[i].time && t < keyframes[i + 1].time {
+                let t0 = keyframes[i].time
+                let t1 = keyframes[i + 1].time
+                let v0 = keyframes[i].value
+                let v1 = keyframes[i + 1].value
+                let frac = (t - t0) / (t1 - t0)
+                // Smooth interpolation
+                let smooth = frac * frac * (3.0 - 2.0 * frac)
+                let base = v0 + (v1 - v0) * smooth
+                // Apply jitter
+                let jitter = (hashFloat(frameSeed, 0xDEAD) - 0.5) * 0.10
+                return max(0, min(1, base + jitter))
+            }
+        }
+
+        return keyframes[keyframes.count - 1].value
+    }
+
+    private func inboundSpawnInterval(for amplitude: Float) -> Float {
+        if amplitude >= 0.8 { return 0.3 }
+        if amplitude >= 0.6 { return 0.6 }
+        if amplitude >= 0.3 { return 1.0 }
+        return 2.0
+    }
+
+    // MARK: - Fast Hashing
+
+    /// Simple deterministic hash returning UInt32
+    private func hash(_ a: UInt32, _ b: UInt32) -> UInt32 {
+        var h = a &+ 0x9e3779b9
+        h = h ^ (b &* 0x85ebca6b)
+        h = h &* 0xcc9e2d51
+        h = (h ^ (h >> 16)) &* 0x85ebca6b
+        h = h ^ (h >> 13)
+        return h
+    }
+
+    /// Hash returning Float in [0, 1)
+    private func hashFloat(_ a: UInt32, _ b: UInt32) -> Float {
+        return Float(hash(a, b) & 0x00FFFFFF) / Float(0x01000000)
+    }
+}

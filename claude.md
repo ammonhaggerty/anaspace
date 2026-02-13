@@ -34,3 +34,6 @@
 - Prefer `NavigationStack` over deprecated `NavigationView`
 - Use `@Bindable` for bindings to @Observable objects
 
+## Project Styling
+- Always use these colors: Background: #CBB4A5, Tint: #E4D7CE, Bold: #301818, Highlight: #FFFFFF, Focus: #FF0000
+- Margins: Top (from screen top edge): 63px, Left/Right: 20px: Buttom: 97px (to account for bottom nav)

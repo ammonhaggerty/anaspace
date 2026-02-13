@@ -10,24 +10,60 @@ enum FontName {
 // MARK: - Grid Metrics
 
 struct GridMetrics {
-    static let fontSize: CGFloat = 15.52
-    static let kern: CGFloat = fontSize * 0.11
-    static let lineHeight: CGFloat = 22.3
+    // Fixed constants
     static let columns: Int = 33
     static let topPadding: CGFloat = 63
     static let bottomFooter: CGFloat = 97
-    static let sideMargin: CGFloat = 16
+    static let sideMargin: CGFloat = 20
 
-    static var font: UIFont {
+    // Kern as a proportion of font size
+    private static let kernRatio: CGFloat = 0.11
+
+    // Computed from screen width
+    let fontSize: CGFloat
+    let kern: CGFloat
+    let lineHeight: CGFloat
+
+    var font: UIFont {
         UIFont(name: FontName.regular, size: fontSize) ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
     }
 
-    static var boldFont: UIFont {
+    var boldFont: UIFont {
         UIFont(name: FontName.bold, size: fontSize) ?? .monospacedSystemFont(ofSize: fontSize, weight: .bold)
     }
 
-    static func rowCount(for availableHeight: CGFloat) -> Int {
-        let gridHeight = availableHeight - topPadding - bottomFooter
+    init(screenWidth: CGFloat) {
+        let availableWidth = screenWidth - 2 * Self.sideMargin
+
+        // Measure font metrics at a reference size
+        let refSize: CGFloat = 100
+        let refFont = UIFont(name: FontName.regular, size: refSize)
+            ?? .monospacedSystemFont(ofSize: refSize, weight: .regular)
+        let charAdvance = NSAttributedString(
+            string: "A", attributes: [.font: refFont]
+        ).size().width
+        let advanceRatio = charAdvance / refSize
+
+        // Measure actual bounding box height of ░ glyph (not typographic ascent+descent)
+        let characters: [UniChar] = [0x2591]
+        var glyphs: [CGGlyph] = [0]
+        CTFontGetGlyphsForCharacters(refFont as CTFont, characters, &glyphs, 1)
+        var boundingRect = CGRect.zero
+        CTFontGetBoundingRectsForGlyphs(refFont as CTFont, .default, glyphs, &boundingRect, 1)
+        let glyphHeightRatio = boundingRect.height / refSize
+
+        // Solve: availableWidth = cols * (fontSize * advanceRatio) + (cols-1) * (fontSize * kernRatio)
+        let cols = CGFloat(Self.columns)
+        let multiplier = cols * advanceRatio + (cols - 1) * Self.kernRatio
+
+        self.fontSize = availableWidth / multiplier
+        self.kern = self.fontSize * Self.kernRatio
+        // Line height = actual glyph height + kern, so vertical gap matches horizontal gap
+        self.lineHeight = self.fontSize * glyphHeightRatio + self.kern
+    }
+
+    func rowCount(for availableHeight: CGFloat) -> Int {
+        let gridHeight = availableHeight - Self.topPadding
         return max(1, Int(floor(gridHeight / lineHeight)))
     }
 }
@@ -47,20 +83,20 @@ enum GridLayer: Int, CaseIterable {
 // MARK: - Grid Color
 
 enum GridColor {
-    case background
-    case structure
-    case content
-    case accent
-    case navDark
+    case background  // #CBB4A5
+    case tint        // #E4D7CE
+    case bold        // #301818
+    case highlight   // #FFFFFF
+    case focus       // #FF0000
     case clear
 
     var uiColor: UIColor {
         switch self {
-        case .background: UIColor(red: 0.769, green: 0.686, blue: 0.627, alpha: 1) // #C4AFA0
-        case .structure:  UIColor(red: 0.710, green: 0.631, blue: 0.573, alpha: 1) // #B5A192
-        case .content:    UIColor(red: 0.165, green: 0.122, blue: 0.102, alpha: 1) // #2A1F1A
-        case .accent:     UIColor(red: 0.878, green: 0.188, blue: 0.188, alpha: 1) // #E03030
-        case .navDark:    UIColor(red: 0.118, green: 0.078, blue: 0.063, alpha: 1) // #1E1410
+        case .background: UIColor(red: 0.796, green: 0.706, blue: 0.647, alpha: 1)
+        case .tint:       UIColor(red: 0.894, green: 0.843, blue: 0.808, alpha: 1)
+        case .bold:       UIColor(red: 0.188, green: 0.094, blue: 0.094, alpha: 1)
+        case .highlight:  UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1)
+        case .focus:      UIColor(red: 1.0, green: 0.0, blue: 0.0, alpha: 1)
         case .clear:      .clear
         }
     }

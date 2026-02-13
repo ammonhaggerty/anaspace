@@ -5,6 +5,7 @@ final class CharacterGrid: UIView {
     // MARK: - State
 
     private(set) var rowCount: Int = 0
+    private(set) var metrics: GridMetrics?
     private var cells: [[CellState]] = []       // [layer][row * cols + col]
     private var dirtyRows: [Set<Int>] = []       // per-layer dirty tracking
     private var textLayers: [[CATextLayer]] = []  // [layer][row]
@@ -25,8 +26,10 @@ final class CharacterGrid: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let newRowCount = GridMetrics.rowCount(for: bounds.height)
-        if newRowCount != rowCount {
+        let newMetrics = GridMetrics(screenWidth: bounds.width)
+        let newRowCount = newMetrics.rowCount(for: bounds.height)
+        if newRowCount != rowCount || metrics == nil {
+            metrics = newMetrics
             rowCount = newRowCount
             rebuildGrid()
         }
@@ -70,13 +73,14 @@ final class CharacterGrid: UIView {
     }
 
     private func positionLayers() {
+        guard let metrics else { return }
         let x = GridMetrics.sideMargin
         let width = bounds.width - 2 * GridMetrics.sideMargin
 
         for layerGroup in textLayers {
             for (row, tl) in layerGroup.enumerated() {
-                let y = GridMetrics.topPadding + CGFloat(row) * GridMetrics.lineHeight
-                tl.frame = CGRect(x: x, y: y, width: width, height: GridMetrics.lineHeight)
+                let y = GridMetrics.topPadding + CGFloat(row) * metrics.lineHeight
+                tl.frame = CGRect(x: x, y: y, width: width, height: metrics.lineHeight)
             }
         }
     }
@@ -115,8 +119,9 @@ final class CharacterGrid: UIView {
     // MARK: - Render
 
     func render() {
+        guard let metrics else { return }
         let cols = GridMetrics.columns
-        let kern = GridMetrics.kern
+        let kern = metrics.kern
 
         for layerIdx in GridLayer.allCases.indices {
             for row in dirtyRows[layerIdx] {
@@ -127,7 +132,7 @@ final class CharacterGrid: UIView {
                 let attributed = NSMutableAttributedString()
                 for col in 0..<cols {
                     let cell = cells[layerIdx][rowStart + col]
-                    let font = cell.bold ? GridMetrics.boldFont : GridMetrics.font
+                    let font = cell.bold ? metrics.boldFont : metrics.font
                     let attrs: [NSAttributedString.Key: Any] = [
                         .font: font,
                         .foregroundColor: cell.color.uiColor,

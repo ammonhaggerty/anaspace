@@ -4,10 +4,19 @@ import SwiftUI
 final class GridController {
     var grid: CharacterGrid?
     let cascade = CascadeAnimation()
+    let observe = ObserveAnimation()
 
     func triggerCascade() {
         guard let grid else { return }
         cascade.run(on: grid)
+    }
+
+    func triggerObserve(restore: @escaping (CharacterGrid) -> Void) {
+        guard let grid else { return }
+        observe.run(on: grid) { [weak grid] in
+            guard let grid else { return }
+            restore(grid)
+        }
     }
 }
 
