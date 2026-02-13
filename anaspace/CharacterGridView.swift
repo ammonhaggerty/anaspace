@@ -3,6 +3,7 @@ import SwiftUI
 @Observable
 final class GridController {
     var grid: CharacterGrid?
+    var isObserving = false
     let cascade = CascadeAnimation()
     let observe = ObserveAnimation()
 
@@ -12,8 +13,10 @@ final class GridController {
     }
 
     func triggerObserve(restore: @escaping (CharacterGrid) -> Void) {
-        guard let grid else { return }
-        observe.run(on: grid) { [weak grid] in
+        guard let grid, !isObserving else { return }
+        isObserving = true
+        observe.run(on: grid) { [weak self, weak grid] in
+            self?.isObserving = false
             guard let grid else { return }
             restore(grid)
         }
