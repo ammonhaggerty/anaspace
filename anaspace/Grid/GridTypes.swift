@@ -23,14 +23,8 @@ struct GridMetrics {
     let fontSize: CGFloat
     let kern: CGFloat
     let lineHeight: CGFloat
-
-    var font: UIFont {
-        UIFont(name: FontName.regular, size: fontSize) ?? .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-    }
-
-    var boldFont: UIFont {
-        UIFont(name: FontName.bold, size: fontSize) ?? .monospacedSystemFont(ofSize: fontSize, weight: .bold)
-    }
+    let font: UIFont
+    let boldFont: UIFont
 
     init(screenWidth: CGFloat) {
         let availableWidth = screenWidth - 2 * Self.sideMargin
@@ -60,6 +54,10 @@ struct GridMetrics {
         self.kern = self.fontSize * Self.kernRatio
         // Line height = actual glyph height + kern, so vertical gap matches horizontal gap
         self.lineHeight = self.fontSize * glyphHeightRatio + self.kern
+        self.font = UIFont(name: FontName.regular, size: self.fontSize)
+            ?? .monospacedSystemFont(ofSize: self.fontSize, weight: .regular)
+        self.boldFont = UIFont(name: FontName.bold, size: self.fontSize)
+            ?? .monospacedSystemFont(ofSize: self.fontSize, weight: .bold)
     }
 
     func rowCount(for availableHeight: CGFloat) -> Int {

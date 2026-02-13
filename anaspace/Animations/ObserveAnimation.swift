@@ -49,9 +49,11 @@ private let amplitudeKeyframes: [(time: Float, value: Float)] = [
 
 // MARK: - ObserveAnimation
 
-final class ObserveAnimation {
+@MainActor
+final class ObserveAnimation: NSObject, GridAnimation {
 
     var config = Config()
+    var isRunning: Bool { displayLink != nil }
 
     private weak var grid: CharacterGrid?
     private var displayLink: CADisplayLink?
@@ -76,7 +78,7 @@ final class ObserveAnimation {
     // MARK: - Public
 
     func run(on grid: CharacterGrid, completion: @escaping () -> Void) {
-        stop()
+        cancel()
 
         self.grid = grid
         self.completion = completion
@@ -98,7 +100,7 @@ final class ObserveAnimation {
         link.add(to: .main, forMode: .common)
     }
 
-    func stop() {
+    func cancel() {
         displayLink?.invalidate()
         displayLink = nil
         if let grid {
@@ -142,7 +144,7 @@ final class ObserveAnimation {
     // MARK: - Frame Loop
 
     @objc private func tick(_ link: CADisplayLink) {
-        guard let grid else { stop(); return }
+        guard let grid else { cancel(); return }
 
         if startTime == 0 { startTime = link.timestamp }
         let elapsed = Float(link.timestamp - startTime)

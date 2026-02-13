@@ -55,7 +55,7 @@ final class CharacterGrid: UIView {
         textLayers = GridLayer.allCases.map { gridLayer in
             (0..<rowCount).map { _ in
                 let tl = CATextLayer()
-                tl.contentsScale = 3.0
+                tl.contentsScale = traitCollection.displayScale
                 tl.backgroundColor = UIColor.clear.cgColor
                 tl.isWrapped = false
                 tl.truncationMode = .none
@@ -114,6 +114,25 @@ final class CharacterGrid: UIView {
             cells[layer.rawValue][row * cols + col] = .empty
         }
         dirtyRows[layer.rawValue].insert(row)
+    }
+
+    // MARK: - Coordinate Mapping
+
+    func rectForCell(row: Int, col: Int) -> CGRect {
+        guard let metrics else { return .zero }
+        let cols = GridMetrics.columns
+        let gridWidth = bounds.width - 2 * GridMetrics.sideMargin
+        let cellWidth = gridWidth / CGFloat(cols)
+
+        let x = GridMetrics.sideMargin + CGFloat(col) * cellWidth
+        let y = GridMetrics.topPadding + CGFloat(row) * metrics.lineHeight
+        return CGRect(x: x, y: y, width: cellWidth, height: metrics.lineHeight)
+    }
+
+    func rectForRegion(row: Int, col: Int, rowSpan: Int, colSpan: Int) -> CGRect {
+        let topLeft = rectForCell(row: row, col: col)
+        let bottomRight = rectForCell(row: row + rowSpan - 1, col: col + colSpan - 1)
+        return topLeft.union(bottomRight)
     }
 
     // MARK: - Render
