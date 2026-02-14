@@ -1,10 +1,9 @@
 import SwiftUI
-import CoreLocation
 
 struct MapLabelOverlay: View {
     let labels: [MapLabel]
     let metrics: GridMetrics
-    var onLabelTap: ((CLLocationCoordinate2D) -> Void)?
+    var onLabelTap: ((MapLabel) -> Void)?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -21,11 +20,9 @@ struct MapLabelOverlay: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    onLabelTap?(CLLocationCoordinate2D(
-                        latitude: label.latitude,
-                        longitude: label.longitude
-                    ))
+                    onLabelTap?(label)
                 }
+                .allowsHitTesting(label.kind != .water)
                 .offset(
                     x: CGFloat(label.col) * metrics.cellWidth,
                     y: CGFloat(label.row) * metrics.lineHeight

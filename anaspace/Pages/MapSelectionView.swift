@@ -52,8 +52,10 @@ struct MapSelectionView: View {
                     MapLabelOverlay(
                         labels: labelProvider.labels,
                         metrics: metrics,
-                        onLabelTap: { coordinate in
-                            onLocationSelected(coordinate)
+                        onLabelTap: { label in
+                            if let coord = labelProvider.coordinateForSelection(label) {
+                                onLocationSelected(coord)
+                            }
                         }
                     )
                     .frame(width: gridWidth, height: clampedHeight)
@@ -66,14 +68,14 @@ struct MapSelectionView: View {
 
                 // Bottom nav bar
                 HStack {
-                    NavButton(iconName: "icon-back", fg: navFg, bg: navDark, onTap: onDismiss)
+                    NavButton(iconName: "arrow-back", fg: navFg, bg: navDark, onTap: onDismiss)
 
                     Spacer()
 
-                    NavButton(iconName: "icon-zoom-out", fg: navFg, bg: navDark) {
+                    NavButton(iconName: "zoom-out", fg: navFg, bg: navDark) {
                         mapController.zoomOut()
                     }
-                    NavButton(iconName: "icon-zoom-in", fg: navFg, bg: navDark) {
+                    NavButton(iconName: "zoom-in", fg: navFg, bg: navDark) {
                         mapController.zoomIn()
                     }
                 }

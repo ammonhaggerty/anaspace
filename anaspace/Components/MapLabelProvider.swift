@@ -1,6 +1,10 @@
 import MapboxMaps
 import UIKit
 
+enum MapLabelKind {
+    case city, state, country, water
+}
+
 struct MapLabel: Identifiable {
     let id: String        // "NAME@lat,lon" dedupe key
     let name: String      // uppercase display text
@@ -10,6 +14,9 @@ struct MapLabel: Identifiable {
     let importance: Int   // lower = more important
     let latitude: Double
     let longitude: Double
+    let kind: MapLabelKind
+    let countryCode: String?  // iso_3166_1 (e.g. "UA", "GR")
+    let stateCode: String?    // iso_3166_2 (e.g. "US-CA")
 }
 
 extension MapLabel: Equatable {
@@ -23,6 +30,7 @@ final class MapLabelProvider {
     var labels: [MapLabel] = []
     var isMoving = false
 
+    private var allCities: [MapLabel] = []
     private weak var mapView: MapView?
     private var cameraCancelable: AnyCancelable?
     private var idleCancelable: AnyCancelable?
@@ -92,6 +100,66 @@ final class MapLabelProvider {
         mapView = nil
     }
 
+    // MARK: - Selection
+
+    func coordinateForSelection(_ label: MapLabel) -> CLLocationCoordinate2D? {
+        switch label.kind {
+        case .city:
+            return CLLocationCoordinate2D(latitude: label.latitude, longitude: label.longitude)
+        case .country:
+            return mostProminentCity(forCountry: label.countryCode, fallback: label)
+        case .state:
+            return mostProminentCity(forState: label.stateCode, fallbackCountry: label.countryCode, fallback: label)
+        case .water:
+            return nil
+        }
+    }
+
+    private func mostProminentCity(forCountry code: String?, fallback label: MapLabel) -> CLLocationCoordinate2D? {
+        if let code, !code.isEmpty {
+            let matches = allCities.filter { $0.countryCode == code }
+            if let best = matches.min(by: { $0.importance < $1.importance }) {
+                return CLLocationCoordinate2D(latitude: best.latitude, longitude: best.longitude)
+            }
+        }
+        // Fallback: nearest prominent city within radius
+        return nearestProminentCity(near: label, searchRadius: 20)
+    }
+
+    private func mostProminentCity(forState code: String?, fallbackCountry: String?, fallback label: MapLabel) -> CLLocationCoordinate2D? {
+        if let code, !code.isEmpty {
+            let matches = allCities.filter { $0.stateCode == code }
+            if let best = matches.min(by: { $0.importance < $1.importance }) {
+                return CLLocationCoordinate2D(latitude: best.latitude, longitude: best.longitude)
+            }
+        }
+        // Fallback: most prominent city in same country within radius
+        if let country = fallbackCountry, !country.isEmpty {
+            let matches = allCities.filter { city in
+                guard city.countryCode == country else { return false }
+                let dlat = city.latitude - label.latitude
+                let dlon = city.longitude - label.longitude
+                return sqrt(dlat * dlat + dlon * dlon) < 8
+            }
+            if let best = matches.min(by: { $0.importance < $1.importance }) {
+                return CLLocationCoordinate2D(latitude: best.latitude, longitude: best.longitude)
+            }
+        }
+        return nearestProminentCity(near: label, searchRadius: 8)
+    }
+
+    private func nearestProminentCity(near label: MapLabel, searchRadius: Double) -> CLLocationCoordinate2D {
+        let candidates = allCities.filter { city in
+            let dlat = city.latitude - label.latitude
+            let dlon = city.longitude - label.longitude
+            return sqrt(dlat * dlat + dlon * dlon) < searchRadius
+        }
+        guard let best = candidates.min(by: { $0.importance < $1.importance }) else {
+            return CLLocationCoordinate2D(latitude: label.latitude, longitude: label.longitude)
+        }
+        return CLLocationCoordinate2D(latitude: best.latitude, longitude: best.longitude)
+    }
+
     // MARK: - Source Discovery
 
     private func discoverVectorSource() {
@@ -137,6 +205,7 @@ final class MapLabelProvider {
         guard !Task.isCancelled else { return }
 
         let processed = processFeatures(features, mapView: mapView)
+        allCities = processed.filter { $0.kind == .city }
         labels = resolveOverlaps(processed)
     }
 
@@ -163,21 +232,29 @@ final class MapLabelProvider {
             }
             guard !name.isEmpty else { continue }
 
-            // Extract symbolrank
+            // Extract symbolrank and ISO codes
             let symbolrank = intProperty(properties, key: "symbolrank") ?? 10
+            let countryCode = stringProperty(properties, key: "iso_3166_1")
+            let stateCode = stringProperty(properties, key: "iso_3166_2")
 
-            // Categorize and filter by source layer
+            // Categorize by source layer and feature class
+            let featureClass = stringProperty(properties, key: "class") ?? ""
             let importance: Int
-            if sourceLayer.contains("country") {
+            let kind: MapLabelKind
+            if sourceLayer.contains("country") || featureClass == "country" {
                 importance = 1
-            } else if sourceLayer.contains("state") {
+                kind = .country
+            } else if sourceLayer.contains("state") || featureClass == "state" || featureClass == "province" {
                 importance = 2
-            } else if sourceLayer.contains("natural") || sourceLayer.contains("water") {
+                kind = .state
+            } else if sourceLayer.contains("natural") || sourceLayer.contains("water") || sourceLayer.contains("marine") {
                 importance = 3 + symbolrank
+                kind = .water
             } else {
                 // place_label (settlements)
                 guard symbolrank <= 12 else { continue }
                 importance = symbolrank
+                kind = .city
             }
 
             // Get coordinate from geometry
@@ -210,7 +287,10 @@ final class MapLabelProvider {
                 length: length,
                 importance: importance,
                 latitude: coordinate.latitude,
-                longitude: coordinate.longitude
+                longitude: coordinate.longitude,
+                kind: kind,
+                countryCode: countryCode,
+                stateCode: stateCode
             ))
         }
 
