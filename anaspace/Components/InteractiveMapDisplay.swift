@@ -22,6 +22,7 @@ struct InteractiveMapDisplay: UIViewRepresentable {
     let coordinate: CLLocationCoordinate2D
     let zoom: Double
     let controller: MapInteractionController
+    var labelProvider: MapLabelProvider?
     var onTap: ((CLLocationCoordinate2D) -> Void)?
 
     func makeCoordinator() -> Coordinator {
@@ -69,11 +70,25 @@ struct InteractiveMapDisplay: UIViewRepresentable {
         controller.mapView = mapView
         context.coordinator.mapView = mapView
 
+        // Attach label provider if available
+        labelProvider?.attach(to: mapView)
+        context.coordinator.labelProvider = labelProvider
+
         return mapView
     }
 
     func updateUIView(_ uiView: MapView, context: Context) {
         context.coordinator.onTap = onTap
+
+        // Attach label provider if it changed
+        if let labelProvider, context.coordinator.labelProvider == nil {
+            labelProvider.attach(to: uiView)
+            context.coordinator.labelProvider = labelProvider
+        }
+    }
+
+    static func dismantleUIView(_ uiView: MapView, coordinator: Coordinator) {
+        coordinator.labelProvider?.detach()
     }
 
     private func hideOrnamentViews(in mapView: MapView) {
@@ -92,6 +107,7 @@ struct InteractiveMapDisplay: UIViewRepresentable {
     class Coordinator: NSObject {
         var onTap: ((CLLocationCoordinate2D) -> Void)?
         weak var mapView: MapView?
+        var labelProvider: MapLabelProvider?
 
         init(onTap: ((CLLocationCoordinate2D) -> Void)?) {
             self.onTap = onTap

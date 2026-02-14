@@ -7,6 +7,7 @@ struct MapSelectionView: View {
     let onDismiss: () -> Void
 
     @State private var mapController = MapInteractionController()
+    @State private var labelProvider: MapLabelProvider?
 
     private let navDark = GridColor.bold.uiColor.swiftUI
     private let navFg = GridColor.background.uiColor.swiftUI
@@ -32,9 +33,7 @@ struct MapSelectionView: View {
                     coordinate: initialCoordinate,
                     zoom: 4,
                     controller: mapController,
-                    onTap: { coordinate in
-                        onLocationSelected(coordinate)
-                    }
+                    labelProvider: labelProvider
                 )
                 .frame(width: gridWidth, height: clampedHeight)
                 .mask(
@@ -47,6 +46,23 @@ struct MapSelectionView: View {
                     x: GridMetrics.sideMargin + gridWidth / 2,
                     y: mapTop + clampedHeight / 2
                 )
+
+                // Label overlay
+                if let labelProvider {
+                    MapLabelOverlay(
+                        labels: labelProvider.labels,
+                        metrics: metrics,
+                        onLabelTap: { coordinate in
+                            onLocationSelected(coordinate)
+                        }
+                    )
+                    .frame(width: gridWidth, height: clampedHeight)
+                    .position(
+                        x: GridMetrics.sideMargin + gridWidth / 2,
+                        y: mapTop + clampedHeight / 2
+                    )
+                    .opacity(labelProvider.isMoving ? 0 : 1)
+                }
 
                 // Bottom nav bar
                 HStack {
@@ -71,5 +87,19 @@ struct MapSelectionView: View {
         }
         .ignoresSafeArea()
         .statusBarHidden()
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { size in
+            guard labelProvider == nil else { return }
+            let metrics = GridMetrics(screenWidth: size.width)
+            let mapHeight = size.height - GridMetrics.topPadding - GridMetrics.bottomFooter
+            let rows = Int(floor(mapHeight / metrics.lineHeight))
+            labelProvider = MapLabelProvider(
+                rows: rows,
+                cols: GridMetrics.columns,
+                cellWidth: metrics.cellWidth,
+                lineHeight: metrics.lineHeight
+            )
+        }
     }
 }
