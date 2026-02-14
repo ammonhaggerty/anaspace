@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var controller = GridController()
     @State private var hasPopulated = false
     @State private var showMapSelection = false
+    @State private var selectedYear: Int = 1978
+    @State private var showYearPicker = false
     @State private var selectedCoordinate = CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712)
 
     // Page renderers
@@ -59,7 +61,7 @@ struct ContentView: View {
                 }
                 .overlay(alignment: .topLeading) {
                     // Tap overlay above grid for map widget (rows 0-9)
-                    if let metrics = controller.metrics {
+                    if navManager.currentPage == .home, let metrics = controller.metrics {
                         Color.clear
                             .contentShape(Rectangle())
                             .frame(
@@ -73,22 +75,55 @@ struct ContentView: View {
                             .onTapGesture { showMapSelection = true }
                     }
                 }
-
-                BottomNavBar(
-                    isObserving: controller.isObserving,
-                    onObserveTap: {
-                        controller.triggerObserve { grid in
-                            populateGrid(grid)
-                        }
-                    },
-                    onHistoryTap: {
-                        navigateTo(.history)
-                    },
-                    onOptionsTap: {
-                        navigateTo(.options)
+                .overlay(alignment: .topLeading) {
+                    // Tap overlay for year display (rows 1-8, right-aligned 8 cols)
+                    if navManager.currentPage == .home, let metrics = controller.metrics {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(
+                                width: CGFloat(8) * metrics.cellWidth,
+                                height: CGFloat(8) * metrics.lineHeight
+                            )
+                            .offset(
+                                x: GridMetrics.sideMargin + CGFloat(GridMetrics.columns - 8) * metrics.cellWidth,
+                                y: GridMetrics.topPadding + metrics.lineHeight
+                            )
+                            .onTapGesture { showYearPicker = true }
                     }
-                )
-                    .frame(height: GridMetrics.bottomFooter)
+                }
+
+                Group {
+                    if navManager.currentPage == .home {
+                        BottomNavBar(
+                            isObserving: controller.isObserving,
+                            onObserveTap: {
+                                controller.triggerObserve { grid in
+                                    populateGrid(grid)
+                                }
+                            },
+                            onHistoryTap: {
+                                navigateTo(.history)
+                            },
+                            onOptionsTap: {
+                                navigateTo(.options)
+                            }
+                        )
+                    } else {
+                        HStack {
+                            NavButton(
+                                iconName: "arrow-back",
+                                fg: GridColor.background.uiColor.swiftUI,
+                                bg: GridColor.bold.uiColor.swiftUI
+                            ) {
+                                navigateTo(.home)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 40)
+                        .padding(.bottom, 16)
+                    }
+                }
+                .frame(height: GridMetrics.bottomFooter)
             }
             .ignoresSafeArea()
         }
@@ -105,6 +140,17 @@ struct ContentView: View {
                 onDismiss: {
                     showMapSelection = false
                 }
+            )
+        }
+        .fullScreenCover(isPresented: $showYearPicker) {
+            YearPickerView(
+                initialYear: selectedYear,
+                onYearSelected: { year in
+                    selectedYear = year
+                    showYearPicker = false
+                    refreshGrid()
+                },
+                onDismiss: { showYearPicker = false }
             )
         }
     }
@@ -138,7 +184,7 @@ struct ContentView: View {
 
             // Year display: 2x2 digits (8 cols wide, 6 rows tall) + 1 gap + button
             // Right-aligned: col = 33 - 8 = 25, starting at row 1
-            YearDisplay(year: 1978, metrics: metrics)
+            YearDisplay(year: selectedYear, metrics: metrics, onTap: { showYearPicker = true })
                 .gridAligned(row: 1, col: cols - 8, metrics: metrics)
         }
 
