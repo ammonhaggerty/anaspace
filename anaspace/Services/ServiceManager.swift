@@ -24,8 +24,8 @@ final class ServiceManager {
     private var holdMode = false
 
     init() {
-        // Wire audio consumers to shared audio service
-        // NOTE: ShazamService manages its own mic via SHManagedSession — no wiring needed
+        // Wire all audio consumers to shared audio service
+        shazam.audioService = audio
         soundAnalysis.audioService = audio
         speech.audioService = audio
     }
@@ -44,24 +44,63 @@ final class ServiceManager {
         holdMode = false
         observationStart = .now
         currentSignals = ObservationSignals()
+        print("[Observe] BEGIN")
+
+        // Request core permissions if not yet granted (stopgap until onboarding)
+        if permissions.microphone != .granted {
+            await permissions.requestMicrophone()
+        }
+        if permissions.location != .granted {
+            await permissions.requestLocation()
+        }
+        if permissions.speechRecognition != .granted {
+            await permissions.requestSpeechRecognition()
+        }
 
         // Activate haptics first for immediate feedback
-        try? await haptics.activate()
+        do {
+            try await haptics.activate()
+            print("[Observe] Haptics: activated")
+        } catch {
+            print("[Observe] Haptics: FAILED - \(error)")
+        }
         haptics.playIdlePulse()
 
         // Activate location and audio in parallel
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { try? await self.location.activate() }
-            group.addTask { try? await self.audio.activate() }
+            group.addTask {
+                do {
+                    try await self.location.activate()
+                } catch {
+                    print("[Observe] Location error: \(error)")
+                }
+            }
+            group.addTask {
+                do {
+                    try await self.audio.activate()
+                } catch {
+                    print("[Observe] Audio error: \(error)")
+                }
+            }
         }
+        print("[Observe] Location: \(location.currentResult?.city ?? "none")")
+        print("[Observe] Audio: \(audio.inputFormat != nil ? "ready" : "FAILED")")
 
         // Audio consumers need the engine running first
-        // Shazam activates in parallel but independently (manages own mic)
+        // All three register as AudioService consumers in their activate()
         await withTaskGroup(of: Void.self) { group in
             group.addTask { try? await self.shazam.activate() }
             group.addTask { try? await self.soundAnalysis.activate() }
             group.addTask { try? await self.speech.activate() }
         }
+
+        // Refresh the audio tap so newly registered consumers receive buffers
+        audio.refreshTap()
+
+        print("[Observe] Shazam: \(shazam.isMatching ? "listening" : "not active")")
+        print("[Observe] SoundAnalysis: \(soundAnalysis.currentScene.rawValue)")
+        print("[Observe] Speech: \(speech.isTranscribing ? "transcribing" : "not active")")
+        print("[Observe] All services ready, monitoring...")
 
         // Start monitoring for resolution triggers (tap mode)
         observationTask = Task {
@@ -84,6 +123,13 @@ final class ServiceManager {
         collectSignals()
         deactivateAll()
         isObserving = false
+        print("[Observe] END - trigger: \(currentSignals?.resolutionTrigger.rawValue ?? "none"), duration: \(String(format: "%.1f", currentSignals?.duration ?? 0))s")
+        if let signals = currentSignals {
+            print("[Observe]   shazam: \(signals.shazamResult?.title ?? "none")")
+            print("[Observe]   speech: \(signals.transcript?.text ?? "none")")
+            print("[Observe]   scene:  \(signals.audioScene.rawValue)")
+            print("[Observe]   location: \(signals.location?.city ?? "none")")
+        }
     }
 
     // MARK: - Private
@@ -101,7 +147,8 @@ final class ServiceManager {
             updateHaptics()
 
             // Check: Shazam match
-            if shazam.result != nil {
+            if let match = shazam.result {
+                print("[Observe] Shazam MATCH: \(match.title) by \(match.artist)")
                 haptics.playSuccess()
                 try? await Task.sleep(for: .milliseconds(300))
                 currentSignals?.resolutionTrigger = .shazamMatch

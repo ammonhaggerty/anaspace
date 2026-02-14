@@ -39,10 +39,7 @@ final class SpeechService: ObservationService {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = true
-        }
+        request.taskHint = .search
 
         self.recognitionRequest = request
 

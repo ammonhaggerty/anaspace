@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import MusicKit
 import ShazamKit
 
@@ -14,8 +14,8 @@ final class ShazamService: ObservationService {
     private(set) var result: ShazamResult?
     private(set) var isMatching = false
 
-    private var session: SHManagedSession?
-    private var matchTask: Task<Void, Never>?
+    private var session: SHSession?
+    private let delegate = ShazamSessionDelegate()
 
     weak var audioService: AudioService?
 
@@ -25,21 +25,14 @@ final class ShazamService: ObservationService {
         result = nil
         isMatching = true
 
-        let managedSession = SHManagedSession()
-        session = managedSession
+        let shazamSession = SHSession()
+        shazamSession.delegate = delegate
+        self.session = shazamSession
 
-        matchTask = Task { [weak self] in
-            let matchResult = await managedSession.result()
-
-            guard let self, !Task.isCancelled else { return }
-
-            switch matchResult {
-            case .match(let match):
-                guard let item = match.mediaItems.first else {
-                    self.result = nil
-                    self.isMatching = false
-                    return
-                }
+        delegate.onMatch = { [weak self] match in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let item = match.mediaItems.first else { return }
 
                 let album = self.extractAlbum(from: item)
                 let releaseYear = self.extractReleaseYear(from: item)
@@ -54,28 +47,32 @@ final class ShazamService: ObservationService {
                     artworkURL: item.artworkURL,
                     confidence: 1.0
                 )
-
-            case .noMatch:
-                self.result = nil
-
-            case .error:
-                self.result = nil
-
-            @unknown default:
-                self.result = nil
+                self.isMatching = false
+                print("[Shazam] Match: \(item.title ?? "?") by \(item.artist ?? "?")")
             }
+        }
 
-            self.isMatching = false
+        delegate.onNoMatch = {
+            print("[Shazam] No match for current segment, continuing...")
+        }
+
+        delegate.onError = { error in
+            print("[Shazam] Error: \(error)")
+        }
+
+        // Register as AudioService consumer — buffers fed via shared AVAudioEngine
+        nonisolated(unsafe) let unsafeSession = shazamSession
+        audioService?.registerConsumer(id: "shazam") { buffer, time in
+            unsafeSession.matchStreamingBuffer(buffer, at: time)
         }
     }
 
     func deactivate() {
-        matchTask?.cancel()
-        matchTask = nil
-
-        session?.cancel()
+        audioService?.removeConsumer(id: "shazam")
+        delegate.onMatch = nil
+        delegate.onNoMatch = nil
+        delegate.onError = nil
         session = nil
-
         isMatching = false
     }
 
@@ -93,5 +90,26 @@ final class ShazamService: ObservationService {
             return Calendar.current.component(.year, from: releaseDate)
         }
         return nil
+    }
+}
+
+// MARK: - Shazam Session Delegate
+
+private final class ShazamSessionDelegate: NSObject, SHSessionDelegate {
+
+    var onMatch: ((SHMatch) -> Void)?
+    var onNoMatch: (() -> Void)?
+    var onError: ((Error) -> Void)?
+
+    func session(_ session: SHSession, didFind match: SHMatch) {
+        onMatch?(match)
+    }
+
+    func session(_ session: SHSession, didNotFindMatchFor signature: SHSignature, error: (any Error)?) {
+        if let error {
+            onError?(error)
+        } else {
+            onNoMatch?()
+        }
     }
 }
