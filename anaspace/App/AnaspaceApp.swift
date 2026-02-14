@@ -224,16 +224,9 @@ struct ContentView: View {
 
     private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) {
         Task {
-            let geocoder = CLGeocoder()
-            let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-            guard let placemark = try? await geocoder.reverseGeocodeLocation(location).first else { return }
-            let city = placemark.locality ?? placemark.name ?? "UNKNOWN"
-            let state = placemark.administrativeArea ?? ""
-            let country = placemark.isoCountryCode ?? ""
-            let label = state.isEmpty
-                ? "\(city) | \(country)".uppercased()
-                : "\(city), \(state) | \(country)".uppercased()
-            homeRenderer?.locationLabel = label
+            let service = LocationService()
+            guard let result = await service.reverseGeocode(coordinate) else { return }
+            homeRenderer?.locationLabel = LocationService.displayLabel(for: result)
             refreshGrid()
         }
     }
