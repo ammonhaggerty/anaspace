@@ -6,13 +6,17 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C6716CA82F406762006D4460 /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = C67D83C12F3C2000007BB1B8 /* MapboxMaps */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		C67D83932F3C166B007BB1B8 /* anaspace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = anaspace.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C67D83D02F3C4000007BB1B8 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		C67D83B02F3C1700007BB1B8 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+		C67D83B02F3C1700007BB1B8 /* Exceptions for "anaspace" folder in "anaspace" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -25,7 +29,7 @@
 		C67D83952F3C166B007BB1B8 /* anaspace */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				C67D83B02F3C1700007BB1B8 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				C67D83B02F3C1700007BB1B8 /* Exceptions for "anaspace" folder in "anaspace" target */,
 			);
 			path = anaspace;
 			sourceTree = "<group>";
@@ -37,6 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C6716CA82F406762006D4460 /* MapboxMaps in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -110,11 +115,11 @@
 			);
 			mainGroup = C67D838A2F3C166B007BB1B8;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = C67D83942F3C166B007BB1B8 /* Products */;
 			packageReferences = (
 				C67D83C02F3C2000007BB1B8 /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
 			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C67D83942F3C166B007BB1B8 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
