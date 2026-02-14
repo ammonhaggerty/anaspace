@@ -20,6 +20,12 @@ final class HomePageRenderer: PageRenderer {
     }
 
     func renderContent(into grid: CharacterGrid) {
+        // White X marker over map area
+        grid.setCell(
+            layer: .content, row: 4, col: 13,
+            state: CellState(character: "\u{2573}", color: .highlight, bold: false)
+        )
+
         let text = "READY TO OBSERVE"
         let cols = GridMetrics.columns
         let centerRow = grid.rowCount / 2

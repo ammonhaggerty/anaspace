@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 @main
 struct AnaspaceApp: App {
@@ -76,6 +77,23 @@ struct ContentView: View {
     @ViewBuilder
     private func componentLayer(metrics: GridMetrics) -> some View {
         let cols = GridMetrics.columns
+
+        // Map display: cols 0-24, rows 0-7
+        let mapCols = 25
+        let mapRows = 8
+        let mapWidth = CGFloat(mapCols) * metrics.cellWidth
+        let mapHeight = CGFloat(mapRows) * metrics.lineHeight
+        let glyphMask = GlyphMask.render(cols: mapCols, rows: mapRows, metrics: metrics)
+
+        MapDisplay(
+            metrics: metrics,
+            coordinate: CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712),
+            zoom: 8
+        )
+        .frame(width: mapWidth, height: mapHeight)
+        .mask(Image(uiImage: glyphMask).resizable())
+        .blendMode(.multiply)
+        .gridAligned(row: 0, col: 0, metrics: metrics)
 
         // "✓ LOCATION" = 12 chars + 2 end caps = 14 cells
         GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
