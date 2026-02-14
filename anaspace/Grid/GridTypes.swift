@@ -4,7 +4,7 @@ import UIKit
 
 enum FontName {
     static let regular = "JetBrainsMono-Regular"
-    static let bold = "JetBrainsMono-Bold"
+    static let bold = "JetBrainsMono-ExtraBold"
 }
 
 // MARK: - Grid Metrics

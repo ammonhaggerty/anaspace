@@ -115,31 +115,45 @@ struct ContentView: View {
     private func componentLayer(metrics: GridMetrics) -> some View {
         let cols = GridMetrics.columns
 
-        // Map widget: map (rows 0-6) + button (row 8) + label (row 9)
-        let mapCols = 24
-        let mapRows = 7
-        let mapWidth = CGFloat(mapCols) * metrics.cellWidth
-        let mapHeight = CGFloat(mapRows) * metrics.lineHeight
-        let glyphMask = GlyphMask.render(cols: mapCols, rows: mapRows, metrics: metrics)
+        if navManager.currentPage == .home {
+            // Map widget: map (rows 0-6) + button (row 8) + label (row 9)
+            let mapCols = 24
+            let mapRows = 7
+            let mapWidth = CGFloat(mapCols) * metrics.cellWidth
+            let mapHeight = CGFloat(mapRows) * metrics.lineHeight
+            let glyphMask = GlyphMask.render(cols: mapCols, rows: mapRows, metrics: metrics)
 
-        MapDisplay(
-            metrics: metrics,
-            coordinate: selectedCoordinate,
-            zoom: 8
-        )
-        .frame(width: mapWidth, height: mapHeight)
-        .mask(Image(uiImage: glyphMask).resizable())
-        .blendMode(.multiply)
-        .gridAligned(row: 0, col: 0, metrics: metrics)
+            MapDisplay(
+                metrics: metrics,
+                coordinate: selectedCoordinate,
+                zoom: 8
+            )
+            .frame(width: mapWidth, height: mapHeight)
+            .mask(Image(uiImage: glyphMask).resizable())
+            .blendMode(.multiply)
+            .gridAligned(row: 0, col: 0, metrics: metrics)
 
-        GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
+            GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
+                .gridAligned(row: 8, col: 0, metrics: metrics)
 
-        .gridAligned(row: 8, col: 0, metrics: metrics)
+            // Year display: 2x2 digits (8 cols wide, 6 rows tall) + 1 gap + button
+            // Right-aligned: col = 33 - 8 = 25, starting at row 1
+            YearDisplay(year: 1978, metrics: metrics)
+                .gridAligned(row: 1, col: cols - 8, metrics: metrics)
+        }
 
-        // Year display: 2x2 digits (8 cols wide, 6 rows tall) + 1 gap + button
-        // Right-aligned: col = 33 - 8 = 25, starting at row 1
-        YearDisplay(year: 1978, metrics: metrics)
-            .gridAligned(row: 1, col: cols - 8, metrics: metrics)
+        if navManager.currentPage == .options {
+            if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
+                let rows = optionsRenderer.settingsRows
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    let labels = ["LOG OUT", "UNLINK", "DOWNLOAD DATA"]
+                    if index < labels.count {
+                        GridButton(label: labels[index], metrics: metrics)
+                            .gridAligned(row: row, col: 1, metrics: metrics)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Grid Population

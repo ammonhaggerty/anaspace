@@ -21,6 +21,20 @@ final class HomePageRenderer: PageRenderer {
         }
     }
 
+    private let sampleItems: [GraphItem] = [
+        GraphItem(glyph: "\u{25A0}", label: "LARRY GRAHAM", relevance: 0.95),
+        GraphItem(glyph: "\u{25A0}", label: "FREDDIE STONE", relevance: 0.9),
+        GraphItem(glyph: "\u{25A0}", label: "ROSE STONE", relevance: 0.85),
+        GraphItem(glyph: "\u{25AA}", label: "MILES DAVIS", relevance: 0.7),
+        GraphItem(glyph: "\u{21A2}", label: "JAMES BROWN", relevance: 0.65),
+        GraphItem(glyph: "\u{21A3}", label: "PRINCE", relevance: 0.6),
+        GraphItem(glyph: "\u{2B58}", label: "STAND!", relevance: 0.8),
+        GraphItem(glyph: "\u{2B58}", label: "THERE'S A RIOT GOIN' ON", relevance: 0.75),
+        GraphItem(glyph: "\u{2207}", label: "SAN FRANCISCO", relevance: 0.5),
+        GraphItem(glyph: "\u{26A1}", label: "WOODSTOCK 1969", relevance: 0.55),
+        GraphItem(glyph: "\u{224B}", label: "PSYCHEDELIC SOUL", relevance: 0.45),
+    ]
+
     func renderContent(into grid: CharacterGrid) {
         // White X marker over map area
         grid.setCell(
@@ -37,23 +51,14 @@ final class HomePageRenderer: PageRenderer {
             )
         }
 
-        let text = "READY TO OBSERVE"
-        let cols = GridMetrics.columns
-        let centerRow = grid.rowCount / 2
-
-        let totalWidth = 2 + text.count
-        let startCol = max(0, (cols - totalWidth) / 2)
-
-        grid.setCell(
-            layer: .content, row: centerRow, col: startCol,
-            state: CellState(character: "\u{25CF}", color: .focus, bold: true)
+        // Radial graph below map area
+        let layout = RadialGraphLayout()
+        layout.render(
+            subject: GraphSubject(label: "SLY STONE"),
+            items: sampleItems,
+            into: grid,
+            startRow: 11,
+            endRow: grid.rowCount - 1
         )
-
-        for (i, ch) in text.enumerated() {
-            grid.setCell(
-                layer: .content, row: centerRow, col: startCol + 2 + i,
-                state: CellState(character: ch, color: .bold, bold: false)
-            )
-        }
     }
 }
