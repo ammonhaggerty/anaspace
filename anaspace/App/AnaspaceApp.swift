@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var selectedYear: Int = 1978
     @State private var showYearPicker = false
     @State private var selectedCoordinate = CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712)
+    @State private var serviceManager = ServiceManager()
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -97,8 +98,15 @@ struct ContentView: View {
                         BottomNavBar(
                             isObserving: controller.isObserving,
                             onObserveTap: {
-                                controller.triggerObserve { grid in
-                                    populateGrid(grid)
+                                if serviceManager.isObserving {
+                                    serviceManager.endObservation()
+                                } else {
+                                    Task {
+                                        await serviceManager.beginObservation()
+                                    }
+                                    controller.triggerObserve { grid in
+                                        populateGrid(grid)
+                                    }
                                 }
                             },
                             onHistoryTap: {
@@ -106,6 +114,17 @@ struct ContentView: View {
                             },
                             onOptionsTap: {
                                 navigateTo(.options)
+                            },
+                            onHoldStart: {
+                                Task {
+                                    await serviceManager.beginObservation()
+                                }
+                                controller.triggerObserve { grid in
+                                    populateGrid(grid)
+                                }
+                            },
+                            onHoldEnd: {
+                                serviceManager.endObservation()
                             }
                         )
                     } else {
@@ -128,6 +147,9 @@ struct ContentView: View {
             .ignoresSafeArea()
         }
         .statusBarHidden()
+        .task {
+            await serviceManager.refreshPermissions()
+        }
         .fullScreenCover(isPresented: $showMapSelection) {
             MapSelectionView(
                 initialCoordinate: selectedCoordinate,
@@ -224,8 +246,7 @@ struct ContentView: View {
 
     private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) {
         Task {
-            let service = LocationService()
-            guard let result = await service.reverseGeocode(coordinate) else { return }
+            guard let result = await serviceManager.location.reverseGeocode(coordinate) else { return }
             homeRenderer?.locationLabel = LocationService.displayLabel(for: result)
             refreshGrid()
         }

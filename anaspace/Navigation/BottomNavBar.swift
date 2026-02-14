@@ -7,6 +7,8 @@ struct BottomNavBar: View {
     var onObserveTap: () -> Void = {}
     var onHistoryTap: () -> Void = {}
     var onOptionsTap: () -> Void = {}
+    var onHoldStart: () -> Void = {}
+    var onHoldEnd: () -> Void = {}
 
     private let navDark = GridColor.bold.uiColor.swiftUI
     private let bg = GridColor.background.uiColor.swiftUI
@@ -23,7 +25,9 @@ struct BottomNavBar: View {
                 navDark: navDark,
                 bg: bg,
                 red: red,
-                onTap: onObserveTap
+                onTap: onObserveTap,
+                onHoldStart: onHoldStart,
+                onHoldEnd: onHoldEnd
             )
 
             Spacer()
@@ -78,9 +82,13 @@ struct ObserveButton: View {
     let bg: Color
     let red: Color
     let onTap: () -> Void
+    var onHoldStart: () -> Void = {}
+    var onHoldEnd: () -> Void = {}
 
     @State private var isPressed = false
     @State private var pulseScale: CGFloat = 1.0
+    @State private var holdTimer: Timer?
+    @State private var isHolding = false
 
     var body: some View {
         Circle()
@@ -107,10 +115,28 @@ struct ObserveButton: View {
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
-                    .onChanged { _ in isPressed = true }
+                    .onChanged { _ in
+                        if !isPressed {
+                            isPressed = true
+                            holdTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+                                Task { @MainActor in
+                                    isHolding = true
+                                    onHoldStart()
+                                }
+                            }
+                        }
+                    }
                     .onEnded { _ in
                         isPressed = false
-                        onTap()
+                        holdTimer?.invalidate()
+                        holdTimer = nil
+
+                        if isHolding {
+                            isHolding = false
+                            onHoldEnd()
+                        } else {
+                            onTap()
+                        }
                     }
             )
     }
