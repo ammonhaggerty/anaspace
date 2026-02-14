@@ -78,6 +78,9 @@ final class ServiceManager {
     func endObservation() {
         guard isObserving else { return }
         observationTask?.cancel()
+        if holdMode {
+            currentSignals?.resolutionTrigger = .userRelease
+        }
         collectSignals()
         deactivateAll()
         isObserving = false

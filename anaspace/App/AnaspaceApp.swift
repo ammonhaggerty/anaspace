@@ -118,6 +118,7 @@ struct ContentView: View {
                             onHoldStart: {
                                 Task {
                                     await serviceManager.beginObservation()
+                                    serviceManager.setHoldMode()
                                 }
                                 controller.triggerObserve { grid in
                                     populateGrid(grid)
