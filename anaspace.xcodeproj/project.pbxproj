@@ -285,6 +285,7 @@
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Anaspace connects to Apple Music to play songs and discover cultural connections.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Anaspace uses your location to explore cultural connections to the place you're in.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Anaspace uses the microphone to identify songs playing around you via Shazam.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Anaspace uses speech recognition to understand your voice commands for cultural exploration.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -322,6 +323,7 @@
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Anaspace connects to Apple Music to play songs and discover cultural connections.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Anaspace uses your location to explore cultural connections to the place you're in.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Anaspace uses the microphone to identify songs playing around you via Shazam.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Anaspace uses speech recognition to understand your voice commands for cultural exploration.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
