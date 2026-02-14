@@ -46,17 +46,6 @@ final class ServiceManager {
         currentSignals = ObservationSignals()
         print("[Observe] BEGIN")
 
-        // Request core permissions if not yet granted (stopgap until onboarding)
-        if permissions.microphone != .granted {
-            await permissions.requestMicrophone()
-        }
-        if permissions.location != .granted {
-            await permissions.requestLocation()
-        }
-        if permissions.speechRecognition != .granted {
-            await permissions.requestSpeechRecognition()
-        }
-
         // Activate haptics first for immediate feedback
         do {
             try await haptics.activate()

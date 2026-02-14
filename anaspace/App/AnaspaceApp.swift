@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var showYearPicker = false
     @State private var selectedCoordinate = CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712)
     @State private var serviceManager = ServiceManager()
+    @State private var onboardingRenderer = OnboardingRenderer()
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -48,7 +49,11 @@ struct ContentView: View {
                 ZStack(alignment: .topLeading) {
                     // Component layer — under the grid text
                     if let metrics = controller.metrics {
-                        componentLayer(metrics: metrics)
+                        if appState.hasCompletedOnboarding {
+                            componentLayer(metrics: metrics)
+                        } else {
+                            onboardingComponentLayer(metrics: metrics)
+                        }
                     }
 
                     // Grid — transparent background, text layers on top
@@ -60,9 +65,21 @@ struct ContentView: View {
                     }
 
                 }
+                .overlay {
+                    // Full-screen tap for onboarding
+                    if !appState.hasCompletedOnboarding {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                handleOnboardingTap()
+                            }
+                    }
+                }
                 .overlay(alignment: .topLeading) {
                     // Tap overlay above grid for map widget (rows 0-9)
-                    if navManager.currentPage == .home, let metrics = controller.metrics {
+                    if appState.hasCompletedOnboarding,
+                       navManager.currentPage == .home,
+                       let metrics = controller.metrics {
                         Color.clear
                             .contentShape(Rectangle())
                             .frame(
@@ -78,7 +95,9 @@ struct ContentView: View {
                 }
                 .overlay(alignment: .topLeading) {
                     // Tap overlay for year display (rows 1-8, right-aligned 8 cols)
-                    if navManager.currentPage == .home, let metrics = controller.metrics {
+                    if appState.hasCompletedOnboarding,
+                       navManager.currentPage == .home,
+                       let metrics = controller.metrics {
                         Color.clear
                             .contentShape(Rectangle())
                             .frame(
@@ -94,7 +113,9 @@ struct ContentView: View {
                 }
 
                 Group {
-                    if navManager.currentPage == .home {
+                    if !appState.hasCompletedOnboarding {
+                        Spacer()
+                    } else if navManager.currentPage == .home {
                         BottomNavBar(
                             isObserving: controller.isObserving,
                             onObserveTap: {
@@ -150,6 +171,20 @@ struct ContentView: View {
         .statusBarHidden()
         .task {
             await serviceManager.refreshPermissions()
+            onboardingRenderer.permissions = serviceManager.permissions
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Re-check permissions when returning from Settings
+            if !appState.hasCompletedOnboarding && onboardingRenderer.isMicDenied {
+                Task {
+                    await serviceManager.refreshPermissions()
+                    if serviceManager.permissions.microphone == .granted {
+                        advanceOnboarding()
+                    } else {
+                        refreshOnboardingGrid()
+                    }
+                }
+            }
         }
         .fullScreenCover(isPresented: $showMapSelection) {
             MapSelectionView(
@@ -228,8 +263,14 @@ struct ContentView: View {
     // MARK: - Grid Population
 
     private func populateGrid(_ grid: CharacterGrid) {
-        currentRenderer.renderStructure(into: grid)
-        currentRenderer.renderContent(into: grid)
+        if appState.hasCompletedOnboarding {
+            currentRenderer.renderStructure(into: grid)
+            currentRenderer.renderContent(into: grid)
+        } else {
+            // Content first — computes hiddenStructureRows for buttons
+            onboardingRenderer.renderContent(into: grid)
+            onboardingRenderer.renderStructure(into: grid)
+        }
         grid.render()
     }
 
@@ -243,6 +284,141 @@ struct ContentView: View {
     private func navigateTo(_ page: Page) {
         guard let targetRenderer = renderers[page] else { return }
         navManager.navigate(to: page, using: controller, renderer: targetRenderer)
+    }
+
+    // MARK: - Onboarding Component Layer
+
+    @ViewBuilder
+    private func onboardingComponentLayer(metrics: GridMetrics) -> some View {
+        let step = onboardingRenderer.currentStep
+
+        // CONTINUE / BEGIN button (shown on all steps except mic-denied)
+        if onboardingRenderer.continueButtonRow > 0 {
+            let label = step == .tips ? "BEGIN" : "CONTINUE"
+            GridButton(label: label, metrics: metrics) {
+                handleOnboardingTap()
+            }
+            .gridAligned(row: onboardingRenderer.continueButtonRow, col: centeredButtonCol(label), metrics: metrics)
+        }
+
+        // OPEN SETTINGS button (mic denied only)
+        if onboardingRenderer.settingsButtonRow > 0 {
+            GridButton(label: "OPEN SETTINGS", metrics: metrics) {
+                openSettings()
+            }
+            .gridAligned(row: onboardingRenderer.settingsButtonRow, col: centeredButtonCol("OPEN SETTINGS"), metrics: metrics)
+        }
+    }
+
+    /// Center a GridButton (label + 2 end-cap cols) within the 33-col grid.
+    private func centeredButtonCol(_ label: String) -> Int {
+        let buttonCols = label.count + 2
+        return max(0, (GridMetrics.columns - buttonCols) / 2)
+    }
+
+    // MARK: - Onboarding Navigation
+
+    private func handleOnboardingTap() {
+        switch onboardingRenderer.currentStep {
+        case .welcome:
+            advanceOnboarding()
+        case .microphone:
+            if onboardingRenderer.isMicDenied { return }
+            Task {
+                await serviceManager.permissions.requestMicrophone()
+                if serviceManager.permissions.microphone == .granted {
+                    advanceOnboarding()
+                } else {
+                    refreshOnboardingGrid()
+                }
+            }
+        case .location:
+            Task {
+                await serviceManager.permissions.requestLocation()
+                advanceOnboarding()
+            }
+        case .speech:
+            Task {
+                await serviceManager.permissions.requestSpeechRecognition()
+                advanceOnboarding()
+            }
+        case .tips:
+            completeOnboarding()
+        }
+    }
+
+    private func advanceOnboarding() {
+        guard let grid = controller.grid else { return }
+        controller.cascade.run(on: grid) { [self] in
+            let nextStep: OnboardingStep? = switch onboardingRenderer.currentStep {
+            case .welcome: .microphone
+            case .microphone: .location
+            case .location: .speech
+            case .speech: .tips
+            case .tips: nil
+            }
+            guard let next = nextStep else { return }
+            onboardingRenderer.currentStep = next
+
+            // Skip permission steps that are already granted
+            if onboardingRenderer.shouldSkipCurrentStep {
+                skipToNextStep(grid: grid)
+                return
+            }
+
+            renderOnboardingStep(grid: grid)
+        }
+    }
+
+    /// Recursively skip already-granted permission steps.
+    private func skipToNextStep(grid: CharacterGrid) {
+        let nextStep: OnboardingStep? = switch onboardingRenderer.currentStep {
+        case .welcome: .microphone
+        case .microphone: .location
+        case .location: .speech
+        case .speech: .tips
+        case .tips: nil
+        }
+        guard let next = nextStep else {
+            // All permissions already granted — go to tips
+            onboardingRenderer.currentStep = .tips
+            renderOnboardingStep(grid: grid)
+            return
+        }
+        onboardingRenderer.currentStep = next
+        if onboardingRenderer.shouldSkipCurrentStep {
+            skipToNextStep(grid: grid)
+        } else {
+            renderOnboardingStep(grid: grid)
+        }
+    }
+
+    private func renderOnboardingStep(grid: CharacterGrid) {
+        grid.clearLayer(.structure)
+        grid.clearLayer(.content)
+        onboardingRenderer.renderContent(into: grid)
+        onboardingRenderer.renderStructure(into: grid)
+        grid.render()
+    }
+
+    private func completeOnboarding() {
+        guard let grid = controller.grid else { return }
+        controller.cascade.run(on: grid) { [self] in
+            appState.hasCompletedOnboarding = true
+            grid.clearLayer(.structure)
+            grid.clearLayer(.content)
+            populateGrid(grid)
+        }
+    }
+
+    private func refreshOnboardingGrid() {
+        guard let grid = controller.grid else { return }
+        renderOnboardingStep(grid: grid)
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) {

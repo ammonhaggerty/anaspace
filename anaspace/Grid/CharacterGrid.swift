@@ -16,6 +16,7 @@ final class CharacterGrid: UIView {
         super.init(frame: frame)
         backgroundColor = .clear
         layer.masksToBounds = true
+        isUserInteractionEnabled = false
     }
 
     required init?(coder: NSCoder) {
