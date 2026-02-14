@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>MBXAccessToken</key>
-	<string>__MAPBOX_TOKEN_PLACEHOLDER__</string>
+	<string>$(MAPBOX_TOKEN)</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>JetBrainsMono-Regular.ttf</string>
