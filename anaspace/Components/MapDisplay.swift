@@ -41,5 +41,7 @@ struct MapDisplay: UIViewRepresentable {
         return mapView
     }
 
-    func updateUIView(_ uiView: MapView, context: Context) {}
+    func updateUIView(_ uiView: MapView, context: Context) {
+        uiView.mapboxMap.setCamera(to: CameraOptions(center: coordinate, zoom: CGFloat(zoom)))
+    }
 }

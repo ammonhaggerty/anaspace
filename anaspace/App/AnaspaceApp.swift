@@ -18,6 +18,8 @@ struct ContentView: View {
     @State private var navManager = NavigationManager()
     @State private var controller = GridController()
     @State private var hasPopulated = false
+    @State private var showMapSelection = false
+    @State private var selectedCoordinate = CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712)
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -28,6 +30,10 @@ struct ContentView: View {
 
     private var currentRenderer: any PageRenderer {
         renderers[navManager.currentPage] ?? HomePageRenderer()
+    }
+
+    private var homeRenderer: HomePageRenderer? {
+        renderers[.home] as? HomePageRenderer
     }
 
     var body: some View {
@@ -48,6 +54,23 @@ struct ContentView: View {
                         hasPopulated = true
                         controller.metrics = grid.metrics
                         populateGrid(grid)
+                    }
+
+                }
+                .overlay(alignment: .topLeading) {
+                    // Tap overlay above grid for map widget (rows 0-9)
+                    if let metrics = controller.metrics {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(
+                                width: CGFloat(25) * metrics.cellWidth,
+                                height: CGFloat(10) * metrics.lineHeight
+                            )
+                            .offset(
+                                x: GridMetrics.sideMargin,
+                                y: GridMetrics.topPadding
+                            )
+                            .onTapGesture { showMapSelection = true }
                     }
                 }
 
@@ -70,6 +93,20 @@ struct ContentView: View {
             .ignoresSafeArea()
         }
         .statusBarHidden()
+        .fullScreenCover(isPresented: $showMapSelection) {
+            MapSelectionView(
+                initialCoordinate: selectedCoordinate,
+                onLocationSelected: { coordinate in
+                    selectedCoordinate = coordinate
+                    showMapSelection = false
+                    reverseGeocode(coordinate)
+                    refreshGrid()
+                },
+                onDismiss: {
+                    showMapSelection = false
+                }
+            )
+        }
     }
 
     // MARK: - Component Layer
@@ -78,16 +115,16 @@ struct ContentView: View {
     private func componentLayer(metrics: GridMetrics) -> some View {
         let cols = GridMetrics.columns
 
-        // Map display: cols 0-24, rows 0-7
+        // Map widget: map (rows 0-6) + button (row 8) + label (row 9)
         let mapCols = 25
-        let mapRows = 8
+        let mapRows = 7
         let mapWidth = CGFloat(mapCols) * metrics.cellWidth
         let mapHeight = CGFloat(mapRows) * metrics.lineHeight
         let glyphMask = GlyphMask.render(cols: mapCols, rows: mapRows, metrics: metrics)
 
         MapDisplay(
             metrics: metrics,
-            coordinate: CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712),
+            coordinate: selectedCoordinate,
             zoom: 8
         )
         .frame(width: mapWidth, height: mapHeight)
@@ -95,14 +132,14 @@ struct ContentView: View {
         .blendMode(.multiply)
         .gridAligned(row: 0, col: 0, metrics: metrics)
 
-        // "✓ LOCATION" = 12 chars + 2 end caps = 14 cells
         GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
-            .gridAligned(row: 9, col: 0, metrics: metrics)
+
+        .gridAligned(row: 8, col: 0, metrics: metrics)
 
         // Year display: 2x2 digits (8 cols wide, 6 rows tall) + 1 gap + button
-        // Right-aligned: col = 33 - 8 = 25, starting at row 2
+        // Right-aligned: col = 33 - 8 = 25, starting at row 1
         YearDisplay(year: 1978, metrics: metrics)
-            .gridAligned(row: 2, col: cols - 8, metrics: metrics)
+            .gridAligned(row: 1, col: cols - 8, metrics: metrics)
     }
 
     // MARK: - Grid Population
@@ -113,8 +150,31 @@ struct ContentView: View {
         grid.render()
     }
 
+    private func refreshGrid() {
+        guard let grid = controller.grid else { return }
+        grid.clearLayer(.content)
+        currentRenderer.renderContent(into: grid)
+        grid.render()
+    }
+
     private func navigateTo(_ page: Page) {
         guard let targetRenderer = renderers[page] else { return }
         navManager.navigate(to: page, using: controller, renderer: targetRenderer)
+    }
+
+    private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) {
+        Task {
+            let geocoder = CLGeocoder()
+            let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            guard let placemark = try? await geocoder.reverseGeocodeLocation(location).first else { return }
+            let city = placemark.locality ?? placemark.name ?? "UNKNOWN"
+            let state = placemark.administrativeArea ?? ""
+            let country = placemark.isoCountryCode ?? ""
+            let label = state.isEmpty
+                ? "\(city) | \(country)".uppercased()
+                : "\(city), \(state) | \(country)".uppercased()
+            homeRenderer?.locationLabel = label
+            refreshGrid()
+        }
     }
 }

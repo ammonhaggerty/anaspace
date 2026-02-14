@@ -1,13 +1,12 @@
 import UIKit
 
 struct GlyphMask {
-    private static var cachedImage: UIImage?
-    private static var cachedKey: String?
+    private static var cache: [String: UIImage] = [:]
 
     static func render(cols: Int, rows: Int, metrics: GridMetrics) -> UIImage {
         let key = "\(cols)x\(rows)@\(metrics.fontSize)"
-        if let cachedImage, cachedKey == key {
-            return cachedImage
+        if let cached = cache[key] {
+            return cached
         }
 
         let width = CGFloat(cols) * metrics.cellWidth
@@ -34,8 +33,7 @@ struct GlyphMask {
             }
         }
 
-        cachedImage = image
-        cachedKey = key
+        cache[key] = image
         return image
     }
 }

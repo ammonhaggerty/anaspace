@@ -5,6 +5,8 @@ final class HomePageRenderer: PageRenderer {
     let page: Page = .home
     let hiddenStructureRows: Set<Int> = Set(0..<10)
 
+    var locationLabel: String = "OAKLAND, CA | USA"
+
     func renderStructure(into grid: CharacterGrid) {
         let cols = GridMetrics.columns
 
@@ -22,9 +24,18 @@ final class HomePageRenderer: PageRenderer {
     func renderContent(into grid: CharacterGrid) {
         // White X marker over map area
         grid.setCell(
-            layer: .content, row: 4, col: 13,
+            layer: .content, row: 3, col: 13,
             state: CellState(character: "\u{2573}", color: .highlight, bold: false)
         )
+
+        // Location label below LOCATION button
+        for (i, ch) in locationLabel.enumerated() {
+            guard i < GridMetrics.columns else { break }
+            grid.setCell(
+                layer: .content, row: 9, col: i,
+                state: CellState(character: ch, color: .bold, bold: false)
+            )
+        }
 
         let text = "READY TO OBSERVE"
         let cols = GridMetrics.columns
