@@ -3,6 +3,7 @@ import Foundation
 @Observable @MainActor
 final class GridController {
     var grid: CharacterGrid?
+    var metrics: GridMetrics?
     var isObserving = false
     let cascade = CascadeAnimation()
     let observe = ObserveAnimation()

@@ -14,7 +14,7 @@ final class CharacterGrid: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = GridColor.background.uiColor
+        backgroundColor = .clear
         layer.masksToBounds = true
     }
 

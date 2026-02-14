@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class HistoryPageRenderer: PageRenderer {
     let page: Page = .history
+    let hiddenStructureRows: Set<Int> = []
 
     func renderStructure(into grid: CharacterGrid) {
         let cols = GridMetrics.columns
@@ -34,6 +35,7 @@ final class HistoryPageRenderer: PageRenderer {
 @MainActor
 final class OptionsPageRenderer: PageRenderer {
     let page: Page = .options
+    let hiddenStructureRows: Set<Int> = []
 
     func renderStructure(into grid: CharacterGrid) {
         let cols = GridMetrics.columns

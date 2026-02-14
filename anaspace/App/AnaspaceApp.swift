@@ -35,10 +35,19 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                CharacterGridView(controller: controller) { grid in
-                    guard !hasPopulated else { return }
-                    hasPopulated = true
-                    populateGrid(grid)
+                ZStack(alignment: .topLeading) {
+                    // Component layer — under the grid text
+                    if let metrics = controller.metrics {
+                        componentLayer(metrics: metrics)
+                    }
+
+                    // Grid — transparent background, text layers on top
+                    CharacterGridView(controller: controller) { grid in
+                        guard !hasPopulated else { return }
+                        hasPopulated = true
+                        controller.metrics = grid.metrics
+                        populateGrid(grid)
+                    }
                 }
 
                 BottomNavBar(
@@ -61,6 +70,24 @@ struct ContentView: View {
         }
         .statusBarHidden()
     }
+
+    // MARK: - Component Layer
+
+    @ViewBuilder
+    private func componentLayer(metrics: GridMetrics) -> some View {
+        let cols = GridMetrics.columns
+
+        // "✓ LOCATION" = 12 chars + 2 end caps = 14 cells
+        // "✓ YEAR" = 6 chars + 2 end caps = 8 cells
+        // YEAR button right-aligned: col = 33 - 8 = 25
+        GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
+            .gridAligned(row: 9, col: 0, metrics: metrics)
+
+        GridButton(label: "YEAR", icon: "\u{2713}", metrics: metrics)
+            .gridAligned(row: 9, col: cols - 8, metrics: metrics)
+    }
+
+    // MARK: - Grid Population
 
     private func populateGrid(_ grid: CharacterGrid) {
         currentRenderer.renderStructure(into: grid)

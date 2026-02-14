@@ -3,11 +3,13 @@ import Foundation
 @MainActor
 final class HomePageRenderer: PageRenderer {
     let page: Page = .home
+    let hiddenStructureRows: Set<Int> = Set(0..<10)
 
     func renderStructure(into grid: CharacterGrid) {
         let cols = GridMetrics.columns
 
         for row in 0..<grid.rowCount {
+            guard !hiddenStructureRows.contains(row) else { continue }
             for col in 0..<cols {
                 grid.setCell(
                     layer: .structure, row: row, col: col,

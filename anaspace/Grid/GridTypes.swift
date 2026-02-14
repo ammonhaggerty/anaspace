@@ -23,6 +23,7 @@ struct GridMetrics {
     let fontSize: CGFloat
     let kern: CGFloat
     let lineHeight: CGFloat
+    let cellWidth: CGFloat
     let font: UIFont
     let boldFont: UIFont
 
@@ -54,6 +55,7 @@ struct GridMetrics {
         self.kern = self.fontSize * Self.kernRatio
         // Line height = actual glyph height + kern, so vertical gap matches horizontal gap
         self.lineHeight = self.fontSize * glyphHeightRatio + self.kern
+        self.cellWidth = availableWidth / cols
         self.font = UIFont(name: FontName.regular, size: self.fontSize)
             ?? .monospacedSystemFont(ofSize: self.fontSize, weight: .regular)
         self.boldFont = UIFont(name: FontName.bold, size: self.fontSize)
