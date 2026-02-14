@@ -78,13 +78,13 @@ struct ContentView: View {
         let cols = GridMetrics.columns
 
         // "✓ LOCATION" = 12 chars + 2 end caps = 14 cells
-        // "✓ YEAR" = 6 chars + 2 end caps = 8 cells
-        // YEAR button right-aligned: col = 33 - 8 = 25
         GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
             .gridAligned(row: 9, col: 0, metrics: metrics)
 
-        GridButton(label: "YEAR", icon: "\u{2713}", metrics: metrics)
-            .gridAligned(row: 9, col: cols - 8, metrics: metrics)
+        // Year display: 2x2 digits (8 cols wide, 6 rows tall) + 1 gap + button
+        // Right-aligned: col = 33 - 8 = 25, starting at row 2
+        YearDisplay(year: 1978, metrics: metrics)
+            .gridAligned(row: 2, col: cols - 8, metrics: metrics)
     }
 
     // MARK: - Grid Population
