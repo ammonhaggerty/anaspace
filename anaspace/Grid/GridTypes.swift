@@ -39,13 +39,10 @@ struct GridMetrics {
         ).size().width
         let advanceRatio = charAdvance / refSize
 
-        // Measure actual bounding box height of ░ glyph (not typographic ascent+descent)
-        let characters: [UniChar] = [0x2591]
-        var glyphs: [CGGlyph] = [0]
-        CTFontGetGlyphsForCharacters(refFont as CTFont, characters, &glyphs, 1)
-        var boundingRect = CGRect.zero
-        CTFontGetBoundingRectsForGlyphs(refFont as CTFont, .default, glyphs, &boundingRect, 1)
-        let glyphHeightRatio = boundingRect.height / refSize
+        // Use font ascent + descent for line height base.
+        // Block characters (░ ▒ ▓) span the full typographic height.
+        let ctFont = refFont as CTFont
+        let glyphHeightRatio = (CTFontGetAscent(ctFont) + CTFontGetDescent(ctFont)) / refSize
 
         // Solve: availableWidth = cols * (fontSize * advanceRatio) + (cols-1) * (fontSize * kernRatio)
         let cols = CGFloat(Self.columns)

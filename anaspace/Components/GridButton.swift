@@ -32,14 +32,6 @@ struct GridButton: View {
             ?? .monospacedSystemFont(ofSize: buttonFontSize, weight: .bold)
     }
 
-    private var buttonKern: CGFloat {
-        // Kern so each button character occupies exactly one grid cell width
-        let charAdvance = NSAttributedString(
-            string: "A", attributes: [.font: buttonFont]
-        ).size().width
-        return metrics.cellWidth - charAdvance
-    }
-
     private var buttonWidth: CGFloat {
         // Text characters + 2 end-cap cells
         CGFloat(displayText.count + 2) * metrics.cellWidth
@@ -59,14 +51,18 @@ struct GridButton: View {
         BeveledShape(bevel: bevel)
             .fill(GridColor.bold.uiColor.swiftUI)
             .frame(width: buttonWidth, height: buttonHeight)
-            .overlay(
-                Text(displayText.uppercased())
-                    .font(Font(buttonFont))
-                    .tracking(buttonKern)
-                    .foregroundStyle(GridColor.tint.uiColor.swiftUI)
-                    // Tracking adds kern after the last char — offset to visually center
-                    .offset(x: -buttonKern / 2)
-            )
+            .overlay {
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: metrics.cellWidth)
+                    ForEach(Array(displayText.uppercased().enumerated()), id: \.offset) { _, ch in
+                        Text(String(ch))
+                            .font(Font(buttonFont))
+                            .foregroundStyle(GridColor.tint.uiColor.swiftUI)
+                            .frame(width: metrics.cellWidth, height: buttonHeight)
+                    }
+                    Color.clear.frame(width: metrics.cellWidth)
+                }
+            }
             .scaleEffect(isPressed ? 0.96 : 1.0)
             .animation(.easeInOut(duration: 0.1), value: isPressed)
             .gesture(

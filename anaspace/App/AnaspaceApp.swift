@@ -63,7 +63,7 @@ struct ContentView: View {
                         Color.clear
                             .contentShape(Rectangle())
                             .frame(
-                                width: CGFloat(25) * metrics.cellWidth,
+                                width: CGFloat(24) * metrics.cellWidth,
                                 height: CGFloat(10) * metrics.lineHeight
                             )
                             .offset(
@@ -116,7 +116,7 @@ struct ContentView: View {
         let cols = GridMetrics.columns
 
         // Map widget: map (rows 0-6) + button (row 8) + label (row 9)
-        let mapCols = 25
+        let mapCols = 24
         let mapRows = 7
         let mapWidth = CGFloat(mapCols) * metrics.cellWidth
         let mapHeight = CGFloat(mapRows) * metrics.lineHeight
