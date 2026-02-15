@@ -79,6 +79,7 @@ struct ContentView: View {
                     // Tap overlay above grid for map widget (rows 0-9)
                     if appState.hasCompletedOnboarding,
                        navManager.currentPage == .home,
+                       homeRenderer?.hasObservations == true,
                        let metrics = controller.metrics {
                         Color.clear
                             .contentShape(Rectangle())
@@ -97,6 +98,7 @@ struct ContentView: View {
                     // Tap overlay for year display (rows 1-8, right-aligned 8 cols)
                     if appState.hasCompletedOnboarding,
                        navManager.currentPage == .home,
+                       homeRenderer?.hasObservations == true,
                        let metrics = controller.metrics {
                         Color.clear
                             .contentShape(Rectangle())
@@ -117,17 +119,12 @@ struct ContentView: View {
                         Spacer()
                     } else if navManager.currentPage == .home {
                         BottomNavBar(
-                            isObserving: controller.isObserving,
+                            isObserving: serviceManager.progress.phase != .idle,
                             onObserveTap: {
-                                if serviceManager.isObserving {
-                                    serviceManager.endObservation()
-                                } else {
-                                    Task {
-                                        await serviceManager.beginObservation()
-                                    }
-                                    controller.triggerObserve { grid in
-                                        populateGrid(grid)
-                                    }
+                                guard serviceManager.progress.phase == .idle else { return }
+                                Task { await serviceManager.beginCapture() }
+                                controller.triggerObserve { grid in
+                                    populateGrid(grid)
                                 }
                             },
                             onHistoryTap: {
@@ -137,16 +134,10 @@ struct ContentView: View {
                                 navigateTo(.options)
                             },
                             onHoldStart: {
-                                Task {
-                                    await serviceManager.beginObservation()
-                                    serviceManager.setHoldMode()
-                                }
-                                controller.triggerObserve { grid in
-                                    populateGrid(grid)
-                                }
+                                Task { await serviceManager.upgradeToHold() }
                             },
                             onHoldEnd: {
-                                serviceManager.endObservation()
+                                serviceManager.endCapture()
                             }
                         )
                     } else {
@@ -186,6 +177,14 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: serviceManager.progress.latestResult?.narrative) { _, _ in
+            handleResultUpdate()
+        }
+        .onChange(of: serviceManager.progress.phase) { _, newPhase in
+            if newPhase == .resolved {
+                handleObservationResolved()
+            }
+        }
         .fullScreenCover(isPresented: $showMapSelection) {
             MapSelectionView(
                 initialCoordinate: selectedCoordinate,
@@ -219,7 +218,7 @@ struct ContentView: View {
     private func componentLayer(metrics: GridMetrics) -> some View {
         let cols = GridMetrics.columns
 
-        if navManager.currentPage == .home {
+        if navManager.currentPage == .home, homeRenderer?.hasObservations == true {
             // Map widget: map (rows 0-6) + button (row 8) + label (row 9)
             let mapCols = 24
             let mapRows = 7
@@ -277,8 +276,38 @@ struct ContentView: View {
     private func refreshGrid() {
         guard let grid = controller.grid else { return }
         grid.clearLayer(.content)
+        grid.clearLayer(.structure)
+        currentRenderer.renderStructure(into: grid)
         currentRenderer.renderContent(into: grid)
         grid.render()
+    }
+
+    private func handleResultUpdate() {
+        guard let result = serviceManager.progress.latestResult else { return }
+        guard let home = homeRenderer else { return }
+
+        home.hasObservations = true
+        home.graphSubject = GraphSubject(label: result.subject.uppercased())
+
+        // Build graph items from connections
+        home.graphItems = result.connections.map { conn in
+            GraphItem(glyph: "\u{25A0}", label: conn.name, relevance: Float(conn.relevance))
+        }
+
+        selectedYear = result.year
+
+        // Update location from progress
+        if let loc = serviceManager.progress.location {
+            selectedCoordinate = loc.coordinate
+            homeRenderer?.locationLabel = LocationService.displayLabel(for: loc)
+        }
+
+        refreshGrid()
+    }
+
+    private func handleObservationResolved() {
+        // Final update after all processing is complete
+        handleResultUpdate()
     }
 
     private func navigateTo(_ page: Page) {

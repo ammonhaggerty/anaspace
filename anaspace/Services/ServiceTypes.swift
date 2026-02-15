@@ -10,6 +10,15 @@ protocol ObservationService {
     func deactivate()
 }
 
+// MARK: - Observation Phase
+
+enum ObservationPhase: String, Sendable {
+    case idle
+    case capturing   // Audio active, services listening
+    case processing  // Audio stopped; Claude/late Shazam still running
+    case resolved    // All done
+}
+
 // MARK: - Observation Mode
 
 enum ObservationMode: String, Codable, Sendable {
@@ -108,6 +117,18 @@ struct ObservationSignals: Sendable {
     }
 }
 
+// MARK: - Claude Result
+
+struct ClaudeResult: Sendable {
+    let subject: String
+    let subjectType: String
+    let place: String
+    let year: Int
+    let narrative: String
+    let connections: [CultureConnection]
+    let isStreaming: Bool  // true while SSE chunks are still arriving
+}
+
 // MARK: - Service Configuration
 
 struct ServiceConfiguration: Sendable {
@@ -121,9 +142,10 @@ struct ServiceConfiguration: Sendable {
     let locationCascadeMaxLevel: Int
     let voiceOverridesShazam: Bool
     let lyricIdEnabled: Bool
+    let shazamTimeoutSeconds: TimeInterval
 
     init(
-        holdThresholdMs: Int = 500,
+        holdThresholdMs: Int = 300,
         hardTimeoutSeconds: TimeInterval = 10,
         silenceTimeoutSeconds: TimeInterval = 5,
         shazamConfidenceThreshold: Double = 0.7,
@@ -132,7 +154,8 @@ struct ServiceConfiguration: Sendable {
         discardShortTranscripts: Int = 3,
         locationCascadeMaxLevel: Int = 4,
         voiceOverridesShazam: Bool = true,
-        lyricIdEnabled: Bool = true
+        lyricIdEnabled: Bool = true,
+        shazamTimeoutSeconds: TimeInterval = 10
     ) {
         self.holdThresholdMs = holdThresholdMs
         self.hardTimeoutSeconds = hardTimeoutSeconds
@@ -144,6 +167,7 @@ struct ServiceConfiguration: Sendable {
         self.locationCascadeMaxLevel = locationCascadeMaxLevel
         self.voiceOverridesShazam = voiceOverridesShazam
         self.lyricIdEnabled = lyricIdEnabled
+        self.shazamTimeoutSeconds = shazamTimeoutSeconds
     }
 }
 

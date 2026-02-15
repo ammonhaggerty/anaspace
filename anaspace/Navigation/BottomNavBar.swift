@@ -118,10 +118,11 @@ struct ObserveButton: View {
                     .onChanged { _ in
                         if !isPressed {
                             isPressed = true
-                            holdTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+                            onTap()  // Fires immediately — starts capture
+                            holdTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
                                 Task { @MainActor in
                                     isHolding = true
-                                    onHoldStart()
+                                    onHoldStart()  // Upgrade to hold
                                 }
                             }
                         }
@@ -130,13 +131,11 @@ struct ObserveButton: View {
                         isPressed = false
                         holdTimer?.invalidate()
                         holdTimer = nil
-
                         if isHolding {
                             isHolding = false
-                            onHoldEnd()
-                        } else {
-                            onTap()
+                            onHoldEnd()  // End capture
                         }
+                        // Tap mode: no action on release (continues on its own)
                     }
             )
     }

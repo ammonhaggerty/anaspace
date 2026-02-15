@@ -24,8 +24,8 @@ final class LocationService: ObservationService {
 
     func deactivate() {
         manager.stopUpdatingLocation()
-        delegate?.onLocation = nil
-        delegate?.onError = nil
+        // Resume any pending continuation before clearing callbacks
+        delegate?.cancelPending()
         delegate = nil
     }
 
@@ -85,6 +85,14 @@ private final class LocationServiceDelegate: NSObject, CLLocationManagerDelegate
 
     var onLocation: ((CLLocation) -> Void)?
     var onError: ((Error) -> Void)?
+
+    /// Resume any pending continuation with a cancellation error, preventing leaks.
+    func cancelPending() {
+        let error = onError
+        onLocation = nil
+        onError = nil
+        error?(CancellationError())
+    }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
