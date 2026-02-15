@@ -14,6 +14,8 @@ extension ObserveAnimation {
         var interferenceChaos: Float = 0.85    // chaos boost during interference
         var redAccentChance: Float = 0.003     // per-cell per-frame red chance
         var duration: Float = 10.0             // total animation seconds
+        var isIndefinite: Bool = false          // loop forever (no auto-stop)
+        var skipRows: Set<Int> = []            // rows to leave clear (e.g., header)
     }
 }
 
@@ -149,7 +151,7 @@ final class ObserveAnimation: NSObject, GridAnimation {
         if startTime == 0 { startTime = link.timestamp }
         let elapsed = Float(link.timestamp - startTime)
 
-        if elapsed >= config.duration {
+        if !config.isIndefinite && elapsed >= config.duration {
             displayLink?.invalidate()
             displayLink = nil
             grid.clearLayer(.transition)
@@ -189,6 +191,11 @@ final class ObserveAnimation: NSObject, GridAnimation {
         let halfInband = config.inboundBandWidth / 2.0
 
         for row in 0..<rows {
+            if config.skipRows.contains(row) {
+                grid.clearRow(layer: .transition, row: row)
+                continue
+            }
+
             var states = [CellState](repeating: .empty, count: cols)
             var rowDirty = false
 
@@ -357,13 +364,14 @@ final class ObserveAnimation: NSObject, GridAnimation {
 
     private func sampleAmplitude(at t: Float) -> Float {
         let keyframes = amplitudeKeyframes
+        let effectiveTime = config.isIndefinite ? t.truncatingRemainder(dividingBy: config.duration) : t
 
         // Find surrounding keyframes
-        if t <= keyframes[0].time { return keyframes[0].value }
-        if t >= keyframes[keyframes.count - 1].time { return keyframes[keyframes.count - 1].value }
+        if effectiveTime <= keyframes[0].time { return keyframes[0].value }
+        if effectiveTime >= keyframes[keyframes.count - 1].time { return keyframes[keyframes.count - 1].value }
 
         for i in 0..<keyframes.count - 1 {
-            if t >= keyframes[i].time && t < keyframes[i + 1].time {
+            if effectiveTime >= keyframes[i].time && effectiveTime < keyframes[i + 1].time {
                 let t0 = keyframes[i].time
                 let t1 = keyframes[i + 1].time
                 let v0 = keyframes[i].value

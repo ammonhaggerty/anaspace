@@ -16,7 +16,9 @@ struct BottomNavBar: View {
 
     var body: some View {
         HStack {
-            NavButton(iconName: "icon-history", fg: bg, bg: navDark, onTap: onHistoryTap)
+            if !isObserving {
+                NavButton(iconName: "icon-history", fg: bg, bg: navDark, onTap: onHistoryTap)
+            }
 
             Spacer()
 
@@ -32,7 +34,9 @@ struct BottomNavBar: View {
 
             Spacer()
 
-            NavButton(iconName: "icon-options", fg: bg, bg: navDark, onTap: onOptionsTap)
+            if !isObserving {
+                NavButton(iconName: "icon-options", fg: bg, bg: navDark, onTap: onOptionsTap)
+            }
         }
         .padding(.horizontal, 40)
         .padding(.bottom, 16)

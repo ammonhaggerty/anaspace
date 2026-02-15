@@ -78,6 +78,7 @@ struct ContentView: View {
                 .overlay(alignment: .topLeading) {
                     // Tap overlay above grid for map widget (rows 0-9)
                     if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
                        navManager.currentPage == .home,
                        homeRenderer?.hasObservations == true,
                        let metrics = controller.metrics {
@@ -97,6 +98,7 @@ struct ContentView: View {
                 .overlay(alignment: .topLeading) {
                     // Tap overlay for year display (rows 1-8, right-aligned 8 cols)
                     if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
                        navManager.currentPage == .home,
                        homeRenderer?.hasObservations == true,
                        let metrics = controller.metrics {
@@ -119,13 +121,16 @@ struct ContentView: View {
                         Spacer()
                     } else if navManager.currentPage == .home {
                         BottomNavBar(
-                            isObserving: serviceManager.progress.phase != .idle,
+                            isObserving: controller.isObserving,
                             onObserveTap: {
                                 guard serviceManager.progress.phase == .idle else { return }
                                 Task { await serviceManager.beginCapture() }
-                                controller.triggerObserve { grid in
-                                    populateGrid(grid)
-                                }
+                                controller.enterCapture(
+                                    mode: .observing,
+                                    progress: serviceManager.progress,
+                                    audioService: serviceManager.audio,
+                                    onWipeOutComplete: {}
+                                )
                             },
                             onHistoryTap: {
                                 navigateTo(.history)
@@ -135,6 +140,7 @@ struct ContentView: View {
                             },
                             onHoldStart: {
                                 Task { await serviceManager.upgradeToHold() }
+                                controller.upgradeCaptureToHold()
                             },
                             onHoldEnd: {
                                 serviceManager.endCapture()
@@ -182,7 +188,10 @@ struct ContentView: View {
         }
         .onChange(of: serviceManager.progress.phase) { _, newPhase in
             if newPhase == .resolved {
-                handleObservationResolved()
+                handleResultUpdate()
+                controller.exitCapture { grid in
+                    populateGrid(grid)
+                }
             }
         }
         .fullScreenCover(isPresented: $showMapSelection) {
@@ -216,43 +225,45 @@ struct ContentView: View {
 
     @ViewBuilder
     private func componentLayer(metrics: GridMetrics) -> some View {
-        let cols = GridMetrics.columns
+        if !controller.isCapturing {
+            let cols = GridMetrics.columns
 
-        if navManager.currentPage == .home, homeRenderer?.hasObservations == true {
-            // Map widget: map (rows 0-6) + button (row 8) + label (row 9)
-            let mapCols = 24
-            let mapRows = 7
-            let mapWidth = CGFloat(mapCols) * metrics.cellWidth
-            let mapHeight = CGFloat(mapRows) * metrics.lineHeight
-            let glyphMask = GlyphMask.render(cols: mapCols, rows: mapRows, metrics: metrics)
+            if navManager.currentPage == .home, homeRenderer?.hasObservations == true {
+                // Map widget: map (rows 0-6) + button (row 8) + label (row 9)
+                let mapCols = 24
+                let mapRows = 7
+                let mapWidth = CGFloat(mapCols) * metrics.cellWidth
+                let mapHeight = CGFloat(mapRows) * metrics.lineHeight
+                let glyphMask = GlyphMask.render(cols: mapCols, rows: mapRows, metrics: metrics)
 
-            MapDisplay(
-                metrics: metrics,
-                coordinate: selectedCoordinate,
-                zoom: 8
-            )
-            .frame(width: mapWidth, height: mapHeight)
-            .mask(Image(uiImage: glyphMask).resizable())
-            .blendMode(.multiply)
-            .gridAligned(row: 0, col: 0, metrics: metrics)
+                MapDisplay(
+                    metrics: metrics,
+                    coordinate: selectedCoordinate,
+                    zoom: 8
+                )
+                .frame(width: mapWidth, height: mapHeight)
+                .mask(Image(uiImage: glyphMask).resizable())
+                .blendMode(.multiply)
+                .gridAligned(row: 0, col: 0, metrics: metrics)
 
-            GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
-                .gridAligned(row: 8, col: 0, metrics: metrics)
+                GridButton(label: "LOCATION", icon: "\u{2713}", metrics: metrics)
+                    .gridAligned(row: 8, col: 0, metrics: metrics)
 
-            // Year display: 2x2 digits (8 cols wide, 6 rows tall) + 1 gap + button
-            // Right-aligned: col = 33 - 8 = 25, starting at row 1
-            YearDisplay(year: selectedYear, metrics: metrics, onTap: { showYearPicker = true })
-                .gridAligned(row: 1, col: cols - 8, metrics: metrics)
-        }
+                // Year display: 2x2 digits (8 cols wide, 6 rows tall) + 1 gap + button
+                // Right-aligned: col = 33 - 8 = 25, starting at row 1
+                YearDisplay(year: selectedYear, metrics: metrics, onTap: { showYearPicker = true })
+                    .gridAligned(row: 1, col: cols - 8, metrics: metrics)
+            }
 
-        if navManager.currentPage == .options {
-            if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
-                let rows = optionsRenderer.settingsRows
-                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                    let labels = ["LOG OUT", "UNLINK", "DOWNLOAD DATA"]
-                    if index < labels.count {
-                        GridButton(label: labels[index], metrics: metrics)
-                            .gridAligned(row: row, col: 1, metrics: metrics)
+            if navManager.currentPage == .options {
+                if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
+                    let rows = optionsRenderer.settingsRows
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        let labels = ["LOG OUT", "UNLINK", "DOWNLOAD DATA"]
+                        if index < labels.count {
+                            GridButton(label: labels[index], metrics: metrics)
+                                .gridAligned(row: row, col: 1, metrics: metrics)
+                        }
                     }
                 }
             }
@@ -303,11 +314,6 @@ struct ContentView: View {
         }
 
         refreshGrid()
-    }
-
-    private func handleObservationResolved() {
-        // Final update after all processing is complete
-        handleResultUpdate()
     }
 
     private func navigateTo(_ page: Page) {
