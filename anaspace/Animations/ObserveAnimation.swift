@@ -16,6 +16,7 @@ extension ObserveAnimation {
         var duration: Float = 10.0             // total animation seconds
         var isIndefinite: Bool = false          // loop forever (no auto-stop)
         var skipRows: Set<Int> = []            // rows to leave clear (e.g., header)
+        var isEvaluating: Bool = false         // contracting circles mode
     }
 }
 
@@ -63,12 +64,14 @@ final class ObserveAnimation: NSObject, GridAnimation {
     private var completion: (() -> Void)?
 
     // Precomputed
-    private var distances: [Float] = []    // [row * cols + col]
-    private var cellSeeds: [UInt32] = []   // per-cell random seeds
+    private var distances: [Float] = []        // from bottom-center origin
+    private var centerDistances: [Float] = []  // from grid center
+    private var cellSeeds: [UInt32] = []       // per-cell random seeds
     private var cols: Int = 0
     private var rows: Int = 0
     private var maxDistance: Float = 0
-    private var colScale: Float = 1.0      // aspect ratio correction for perfect circles
+    private var maxCenterDistance: Float = 0
+    private var colScale: Float = 1.0          // aspect ratio correction for perfect circles
 
     // Active waves
     private var outboundWaves: [OutboundWave] = []
@@ -102,6 +105,15 @@ final class ObserveAnimation: NSObject, GridAnimation {
         link.add(to: .main, forMode: .common)
     }
 
+    /// Clears all active waves and resets spawn timers. Call when switching modes.
+    func resetWaves() {
+        outboundWaves.removeAll()
+        inboundWaves.removeAll()
+        // Force next spawn to happen on the next frame
+        nextOutboundSpawn = 0
+        nextInboundSpawn = 0
+    }
+
     func cancel() {
         displayLink?.invalidate()
         displayLink = nil
@@ -129,16 +141,31 @@ final class ObserveAnimation: NSObject, GridAnimation {
         }
 
         distances = [Float](repeating: 0, count: totalCells)
+        centerDistances = [Float](repeating: 0, count: totalCells)
         cellSeeds = (0..<totalCells).map { _ in UInt32.random(in: 0...UInt32.max) }
         maxDistance = 0
+        maxCenterDistance = 0
+
+        let centerCol: Float = Float(cols) / 2.0
+        let centerRow: Float = Float(rows) / 2.0
 
         for row in 0..<rows {
             for col in 0..<cols {
+                let idx = row * cols + col
+
+                // Bottom-center origin (for observe mode)
                 let dx = (Float(col) - originCol) * colScale
                 let dy = Float(row) - originRow
                 let dist = sqrtf(dx * dx + dy * dy)
-                distances[row * cols + col] = dist
+                distances[idx] = dist
                 if dist > maxDistance { maxDistance = dist }
+
+                // Grid center origin (for evaluating mode)
+                let cdx = (Float(col) - centerCol) * colScale
+                let cdy = Float(row) - centerRow
+                let cDist = sqrtf(cdx * cdx + cdy * cdy)
+                centerDistances[idx] = cDist
+                if cDist > maxCenterDistance { maxCenterDistance = cDist }
             }
         }
     }
@@ -164,26 +191,41 @@ final class ObserveAnimation: NSObject, GridAnimation {
 
         frameSeed &+= 1
 
-        // --- Spawn / prune outbound waves ---
-        if elapsed >= nextOutboundSpawn {
-            outboundWaves.append(OutboundWave(spawnTime: elapsed))
-            nextOutboundSpawn = elapsed + config.outboundPulseInterval
-        }
-        let outboundCycleMax = maxDistance + config.outboundBandWidth / 2.0
-        outboundWaves.removeAll { (elapsed - $0.spawnTime) * config.outboundSpeed > outboundCycleMax }
+        if config.isEvaluating {
+            // --- Evaluating: contracting circles toward grid center ---
+            let contractSpeed = maxCenterDistance / 3.0  // 3s edge-to-center
 
-        // --- Sample amplitude ---
-        let amplitude = sampleAmplitude(at: elapsed)
+            if elapsed >= nextOutboundSpawn {
+                outboundWaves.append(OutboundWave(spawnTime: elapsed))
+                nextOutboundSpawn = elapsed + 2.5  // new circle every 2.5s
+            }
+            outboundWaves.removeAll { wave in
+                let wavefront = maxCenterDistance - (elapsed - wave.spawnTime) * contractSpeed
+                return wavefront < -config.outboundBandWidth / 2.0
+            }
+            inboundWaves.removeAll()
+        } else {
+            // --- Spawn / prune outbound waves ---
+            if elapsed >= nextOutboundSpawn {
+                outboundWaves.append(OutboundWave(spawnTime: elapsed))
+                nextOutboundSpawn = elapsed + config.outboundPulseInterval
+            }
+            let outboundCycleMax = maxDistance + config.outboundBandWidth / 2.0
+            outboundWaves.removeAll { (elapsed - $0.spawnTime) * config.outboundSpeed > outboundCycleMax }
 
-        // --- Spawn / prune inbound waves ---
-        let spawnInterval = inboundSpawnInterval(for: amplitude)
-        if elapsed >= nextInboundSpawn {
-            inboundWaves.append(InboundWave(spawnTime: elapsed, amplitude: amplitude))
-            nextInboundSpawn = elapsed + spawnInterval
-        }
-        inboundWaves.removeAll { wave in
-            let wavefront = maxDistance - (elapsed - wave.spawnTime) * config.inboundSpeed
-            return wavefront < -config.inboundBandWidth / 2.0
+            // --- Sample amplitude ---
+            let amplitude = sampleAmplitude(at: elapsed)
+
+            // --- Spawn / prune inbound waves ---
+            let spawnInterval = inboundSpawnInterval(for: amplitude)
+            if elapsed >= nextInboundSpawn {
+                inboundWaves.append(InboundWave(spawnTime: elapsed, amplitude: amplitude))
+                nextInboundSpawn = elapsed + spawnInterval
+            }
+            inboundWaves.removeAll { wave in
+                let wavefront = maxDistance - (elapsed - wave.spawnTime) * config.inboundSpeed
+                return wavefront < -config.inboundBandWidth / 2.0
+            }
         }
 
         // --- Evaluate cells row by row ---
@@ -201,16 +243,22 @@ final class ObserveAnimation: NSObject, GridAnimation {
 
             for col in 0..<cols {
                 let idx = row * cols + col
-                let dist = distances[idx]
+                let dist = config.isEvaluating ? centerDistances[idx] : distances[idx]
                 let seed = cellSeeds[idx]
 
                 var outResult: CellResult?
                 var inResult: CellResult?
 
-                // Check outbound waves
+                // Check outbound waves (or contracting waves in evaluating mode)
                 var outWaveId: UInt32 = 0
                 for (i, wave) in outboundWaves.enumerated() {
-                    let wavefront = (elapsed - wave.spawnTime) * config.outboundSpeed
+                    let wavefront: Float
+                    if config.isEvaluating {
+                        let contractSpeed = maxCenterDistance / 3.0
+                        wavefront = maxCenterDistance - (elapsed - wave.spawnTime) * contractSpeed
+                    } else {
+                        wavefront = (elapsed - wave.spawnTime) * config.outboundSpeed
+                    }
                     let offset = dist - wavefront
                     if abs(offset) <= halfOutband {
                         outWaveId = UInt32(i) &+ UInt32(bitPattern: Int32(wave.spawnTime * 100))

@@ -296,11 +296,7 @@ final class ServiceManager {
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
                 progress.setClaudeProcessing(false)
-
-                // If no late Shazam pending, resolve now
-                if lateShazamTask == nil {
-                    resolve()
-                }
+                resolve()
             } catch {
                 progress.logEvent("Claude error: \(error)")
                 progress.setClaudeProcessing(false)

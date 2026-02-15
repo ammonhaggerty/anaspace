@@ -14,6 +14,9 @@ final class GridController {
     // Queued restore closure for edge case: exitCapture called during wipe
     private var pendingRestore: ((CharacterGrid) -> Void)?
 
+    // Track hold upgrade that arrives before wipe completes
+    private var pendingHoldUpgrade = false
+
     func triggerCascade() {
         guard let grid else { return }
         cascade.run(on: grid) {}
@@ -30,6 +33,7 @@ final class GridController {
         guard let grid, !isCapturing else { return }
         isCapturing = true
         isObserving = true
+        pendingHoldUpgrade = false
 
         wipe.wipeOut(on: grid) { [weak self] in
             guard let self, let grid = self.grid else { return }
@@ -45,21 +49,26 @@ final class GridController {
                 grid.setRow(layer: .structure, row: row, states: states)
             }
 
+            // Use upgraded mode if hold happened during wipe
+            let effectiveMode: CaptureRenderer.Mode = self.pendingHoldUpgrade ? .listening : mode
+
             // Start CaptureRenderer
             self.captureRenderer.onTransitionToEvaluating = { [weak self] in
                 self?.transitionToEvaluating()
             }
             self.captureRenderer.start(
                 on: grid,
-                mode: mode,
+                mode: effectiveMode,
                 progress: progress,
                 audioService: audioService
             )
 
-            // Start ObserveAnimation (indefinite, skip header rows)
-            self.observe.config.isIndefinite = true
-            self.observe.config.skipRows = [0, 1]
-            self.observe.run(on: grid) {}
+            // Only run ObserveAnimation for observing mode (not listening)
+            if effectiveMode == .observing {
+                self.observe.config.isIndefinite = true
+                self.observe.config.skipRows = [0, 1]
+                self.observe.run(on: grid) {}
+            }
 
             // Reveal capture view
             self.wipe.wipeIn(on: grid) { [weak self] in
@@ -73,16 +82,24 @@ final class GridController {
     }
 
     func exitCapture(restore: @escaping (CharacterGrid) -> Void) {
-        // If a wipe is currently running, queue the restore
+        // Cancel any running wipe to ensure cleanup always runs
         if wipe.isRunning {
-            pendingRestore = restore
-            return
+            wipe.cancel()
         }
+        pendingRestore = nil
         performExit(restore: restore)
     }
 
     func upgradeCaptureToHold() {
-        captureRenderer.upgradeToListening()
+        if wipe.isRunning {
+            // Wipe still in progress — flag for when CaptureRenderer starts
+            pendingHoldUpgrade = true
+        } else {
+            // CaptureRenderer already running — upgrade live
+            captureRenderer.upgradeToListening()
+            // Stop observe animation for listening mode
+            observe.cancel()
+        }
     }
 
     func transitionToEvaluating() {
@@ -92,8 +109,18 @@ final class GridController {
         grid.clearRow(layer: .structure, row: 2)
         grid.clearRow(layer: .structure, row: 3)
 
-        // Expand observe animation skipRows to include rows 2-3
-        observe.config.skipRows = [0, 1, 2, 3]
+        // Start observe animation with contracting circles if not already running
+        if !observe.isRunning {
+            observe.config.isIndefinite = true
+            observe.config.skipRows = [0, 1, 2, 3]
+            observe.config.isEvaluating = true
+            observe.run(on: grid) {}
+        } else {
+            // Expand observe animation skipRows and switch to contracting circles
+            observe.config.skipRows = [0, 1, 2, 3]
+            observe.config.isEvaluating = true
+            observe.resetWaves()
+        }
 
         // Clear any transcript or leftover content on rows 2+
         for row in 2..<grid.rowCount {
@@ -125,8 +152,10 @@ final class GridController {
             self.wipe.wipeIn(on: grid) { [weak self] in
                 self?.isCapturing = false
                 self?.isObserving = false
+                self?.pendingHoldUpgrade = false
                 self?.observe.config.isIndefinite = false
                 self?.observe.config.skipRows = []
+                self?.observe.config.isEvaluating = false
             }
         }
     }

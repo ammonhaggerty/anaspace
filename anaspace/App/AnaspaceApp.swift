@@ -143,7 +143,10 @@ struct ContentView: View {
                                 controller.upgradeCaptureToHold()
                             },
                             onHoldEnd: {
-                                serviceManager.endCapture()
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(500))
+                                    serviceManager.endCapture()
+                                }
                             }
                         )
                     } else {
@@ -313,7 +316,10 @@ struct ContentView: View {
             homeRenderer?.locationLabel = LocationService.displayLabel(for: loc)
         }
 
-        refreshGrid()
+        // Only refresh grid if not in capture mode — exitCapture will handle it
+        if !controller.isCapturing {
+            refreshGrid()
+        }
     }
 
     private func navigateTo(_ page: Page) {

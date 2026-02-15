@@ -152,12 +152,6 @@ final class CaptureRenderer: NSObject {
             }
         }
 
-        // Transcript snippet
-        if let transcript = progress.transcript?.text, !transcript.isEmpty {
-            let snippet = String(transcript.prefix(cols - 8)).uppercased()
-            items.append(SignalItem(label: "HEARD", value: snippet))
-        }
-
         transitionToEvaluating(signals: items)
         onTransitionToEvaluating?()
     }
@@ -321,7 +315,7 @@ final class CaptureRenderer: NSObject {
         if progress.shazamResult != nil {
             indicator = "ID\u{2713}"
         } else {
-            if elapsed - lastIndicatorToggle >= 0.5 {
+            if elapsed - lastIndicatorToggle >= 0.25 {
                 indicatorToggle.toggle()
                 lastIndicatorToggle = elapsed
             }
@@ -340,36 +334,41 @@ final class CaptureRenderer: NSObject {
 
     private func renderTranscript(grid: CharacterGrid, progress: ObservationProgress) {
         guard let text = progress.transcript?.text, !text.isEmpty else { return }
-        guard text != lastTranscriptText else { return }
-        lastTranscriptText = text
+        let upper = text.uppercased()
+        guard upper != lastTranscriptText else { return }
+        lastTranscriptText = upper
 
+        // 1-cell padding: rows 3..<maxRow-1, cols 1..<cols-1
+        let padCol = 1
+        let maxCol = cols - 1
+        let usableCols = maxCol - padCol
         let startRow = 3
-        let maxRow = grid.rowCount
-        for row in startRow..<maxRow {
+        let maxRow = grid.rowCount - 1
+        for row in startRow..<grid.rowCount {
             grid.clearRow(layer: .content, row: row)
         }
 
-        let words = text.split(separator: " ")
+        let words = upper.split(separator: " ")
         var row = startRow
-        var col = 0
+        var col = padCol
 
         for word in words {
             let wordLen = word.count
-            if col + wordLen > cols && col > 0 {
+            if col - padCol + wordLen > usableCols && col > padCol {
                 row += 1
-                col = 0
+                col = padCol
             }
             guard row < maxRow else { break }
 
             for ch in word {
-                if col >= cols {
+                if col >= maxCol {
                     row += 1
-                    col = 0
+                    col = padCol
                 }
                 guard row < maxRow else { break }
                 grid.setCell(
                     layer: .content, row: row, col: col,
-                    state: CellState(character: ch, color: .highlight, bold: false)
+                    state: CellState(character: ch, color: .bold, bold: false)
                 )
                 col += 1
             }
