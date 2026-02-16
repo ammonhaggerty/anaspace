@@ -281,7 +281,7 @@ struct ContentView: View {
                         BottomNavBar(
                             isObserving: controller.isObserving,
                             onObserveTap: {
-                                guard serviceManager.progress.phase == .idle else { return }
+                                guard serviceManager.progress.phase == .idle || serviceManager.progress.phase == .resolved else { return }
                                 activeHistoryEntryId = nil
                                 Task { await serviceManager.beginCapture() }
                                 controller.enterCapture(

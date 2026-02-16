@@ -141,30 +141,11 @@ final class AudioPlayerService {
     }
 
     func beginFadeAndPrepareForCapture() {
-        guard state == .playing else {
-            stopEngine()
-            return
-        }
-        state = .fading
-        var volume: Float = 1.0
-        fadeTimer?.invalidate()
-        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                volume -= 0.05 / 3.0  // ~3s fade
-                if volume <= 0 {
-                    self.fadeTimer?.invalidate()
-                    self.fadeTimer = nil
-                    self.stopEngine()
-                    self.state = .idle
-                    self.currentLevel = 0
-                    self.peakLevel = 0
-                    self.renderPlayerRow()
-                } else {
-                    self.playerNode?.volume = volume
-                }
-            }
-        }
+        stopEngine()
+        state = .idle
+        currentLevel = 0
+        peakLevel = 0
+        renderPlayerRow()
     }
 
     func stopEngine() {
