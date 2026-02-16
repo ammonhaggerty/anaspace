@@ -20,6 +20,18 @@ struct GraphItem {
     }
 }
 
+// MARK: - Placement Result
+
+struct PlacedItem: Identifiable {
+    let index: Int       // Index into the original items array
+    let row: Int         // Grid row (absolute, including startRow offset)
+    let col: Int         // Grid column (left edge of block)
+    let width: Int       // Block width in columns
+    let height: Int      // Block height in rows
+
+    var id: Int { index }
+}
+
 // MARK: - Occupancy Grid
 
 private struct OccupancyGrid {
@@ -72,16 +84,17 @@ struct RadialGraphLayout {
     // Aspect ratio: cols are narrower than rows are tall in the monospace grid
     private let colScale: Float = 0.6
 
+    @discardableResult
     func render(
         subject: GraphSubject,
         items: [GraphItem],
         into grid: CharacterGrid,
         startRow: Int,
         endRow: Int
-    ) {
+    ) -> [PlacedItem] {
         let areaRows = endRow - startRow + 1
         let areaCols = GridMetrics.columns
-        guard areaRows > 4, areaCols > 4 else { return }
+        guard areaRows > 4, areaCols > 4 else { return [] }
 
         // 1-cell inset margin on all sides
         let minRow = 1
@@ -135,13 +148,17 @@ struct RadialGraphLayout {
 
         // --- Place items ---
 
-        let sorted = items.sorted { $0.relevance > $1.relevance }
+        var placements: [PlacedItem] = []
+        let sorted = items.enumerated()
+            .sorted { $0.element.relevance > $1.element.relevance }
         let halfHeight = Float(centerRow - minRow)
 
         // Golden ratio for horizontal variety
         let goldenRatio: Float = 1.618034
 
-        for (index, item) in sorted.enumerated() {
+        for (index, entry) in sorted.enumerated() {
+            let originalIndex = entry.offset
+            let item = entry.element
             let lines = TextWrapper.wrap(item.label, maxWidth: 14, maxLines: 2)
             guard !lines.isEmpty else { continue }
 
@@ -240,6 +257,13 @@ struct RadialGraphLayout {
                                 row: tryRow, col: blockLeft,
                                 width: blockW, height: blockH
                             )
+                            placements.append(PlacedItem(
+                                index: originalIndex,
+                                row: startRow + tryRow,
+                                col: blockLeft,
+                                width: blockW,
+                                height: blockH
+                            ))
                             placed = true
                             break
                         }
@@ -247,5 +271,7 @@ struct RadialGraphLayout {
                 }
             }
         }
+
+        return placements
     }
 }

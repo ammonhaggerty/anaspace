@@ -21,17 +21,8 @@ final class NavigationManager {
         let previousPage = currentPage
         pageStack.append(previousPage)
 
-        // Run cascade transition on transition layer
-        controller.cascade.run(on: controller.grid!) { [weak self] in
-            guard let self else { return }
-            // While covered by transition: swap content
-            self.currentPage = page
-            if let grid = controller.grid {
-                grid.clearLayer(.content)
-                renderer.renderContent(into: grid)
-                grid.render()
-            }
-            self.isTransitioning = false
+        performWipeTransition(using: controller, renderer: renderer) { [weak self] in
+            self?.currentPage = page
         }
     }
 
@@ -39,15 +30,38 @@ final class NavigationManager {
         guard !isTransitioning, let previousPage = pageStack.popLast() else { return }
         isTransitioning = true
 
-        controller.cascade.run(on: controller.grid!) { [weak self] in
-            guard let self else { return }
-            self.currentPage = previousPage
-            if let grid = controller.grid {
-                grid.clearLayer(.content)
-                renderer.renderContent(into: grid)
-                grid.render()
+        performWipeTransition(using: controller, renderer: renderer) { [weak self] in
+            self?.currentPage = previousPage
+        }
+    }
+
+    // MARK: - Wipe Transition
+
+    /// Standard page transition: wipe out cell-by-cell, swap content while covered, wipe in to reveal.
+    private func performWipeTransition(
+        using controller: GridController,
+        renderer: PageRenderer,
+        pageUpdate: @escaping () -> Void
+    ) {
+        guard let grid = controller.grid else {
+            isTransitioning = false
+            return
+        }
+
+        controller.wipe.wipeOut(on: grid) { [weak self] in
+            guard let self, let grid = controller.grid else { return }
+
+            pageUpdate()
+
+            grid.clearLayer(.content)
+            grid.clearLayer(.structure)
+            renderer.renderStructure(into: grid)
+            renderer.renderContent(into: grid)
+            grid.render()
+
+            controller.wipe.wipeIn(on: grid) { [weak self] in
+                self?.isTransitioning = false
             }
-            self.isTransitioning = false
         }
     }
 }

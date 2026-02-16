@@ -151,6 +151,7 @@ struct CultureConnection: Sendable {
     let entityType: EntityType
     let relationship: String
     let relevance: Double
+    let description: String
 }
 
 // MARK: - Claude Result

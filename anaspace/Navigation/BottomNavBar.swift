@@ -78,6 +78,36 @@ struct NavButton: View {
     }
 }
 
+// MARK: - Nav Text Button
+
+struct NavTextButton: View {
+    let label: String
+    let fg: Color
+    let bg: Color
+    var onTap: () -> Void = {}
+
+    @State private var isPressed = false
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 13, weight: .bold, design: .monospaced))
+            .foregroundStyle(fg)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Capsule().fill(bg))
+            .scaleEffect(isPressed ? 0.92 : 1.0)
+            .animation(.easeInOut(duration: 0.12), value: isPressed)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in isPressed = true }
+                    .onEnded { _ in
+                        isPressed = false
+                        onTap()
+                    }
+            )
+    }
+}
+
 // MARK: - Observe Button with Pulse
 
 struct ObserveButton: View {

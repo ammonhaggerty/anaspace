@@ -90,6 +90,7 @@ final class WipeAnimation: NSObject, GridAnimation {
         }
 
         let fillState = CellState(character: "\u{2591}", color: .tint, bold: false)
+        let opaqueState = CellState(character: "\u{2588}", color: .background, bold: false)
         var lastRowTouched = -1
 
         for cellIndex in (lastProcessed + 1)...targetCell {
@@ -98,6 +99,8 @@ final class WipeAnimation: NSObject, GridAnimation {
 
             if isWipingOut {
                 grid.setCell(layer: .transition, row: row, col: col, state: fillState)
+                grid.setCell(layer: .content, row: row, col: col, state: .empty)
+                grid.setCell(layer: .structure, row: row, col: col, state: opaqueState)
             } else {
                 grid.setCell(layer: .transition, row: row, col: col, state: .empty)
             }

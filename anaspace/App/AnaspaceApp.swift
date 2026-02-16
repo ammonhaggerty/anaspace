@@ -30,6 +30,7 @@ struct ContentView: View {
         .home: HomePageRenderer(),
         .history: HistoryPageRenderer(),
         .options: OptionsPageRenderer(),
+        .info: InfoPageRenderer(),
     ]
 
     private var currentRenderer: any PageRenderer {
@@ -38,6 +39,10 @@ struct ContentView: View {
 
     private var homeRenderer: HomePageRenderer? {
         renderers[.home] as? HomePageRenderer
+    }
+
+    private var infoRenderer: InfoPageRenderer? {
+        renderers[.info] as? InfoPageRenderer
     }
 
     var body: some View {
@@ -115,6 +120,55 @@ struct ContentView: View {
                             .onTapGesture { showYearPicker = true }
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    // Tap overlay for subject label in radial graph center
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
+                       navManager.currentPage == .home,
+                       homeRenderer?.hasObservations == true,
+                       let metrics = controller.metrics {
+                        let graphStartRow = 11
+                        let areaRows = controller.grid?.rowCount ?? 40
+                        let centerRow = graphStartRow + (areaRows - graphStartRow) / 2 - 1
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(
+                                width: CGFloat(16) * metrics.cellWidth,
+                                height: CGFloat(3) * metrics.lineHeight
+                            )
+                            .offset(
+                                x: GridMetrics.sideMargin + CGFloat((GridMetrics.columns - 16) / 2) * metrics.cellWidth,
+                                y: GridMetrics.topPadding + CGFloat(centerRow - 1) * metrics.lineHeight
+                            )
+                            .onTapGesture { navigateToInfo() }
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    // Tap overlays for placed entities in radial graph
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
+                       navManager.currentPage == .home,
+                       let home = homeRenderer,
+                       home.hasObservations,
+                       let metrics = controller.metrics {
+                        ForEach(home.placements, id: \.index) { placement in
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .frame(
+                                    width: CGFloat(placement.width) * metrics.cellWidth,
+                                    height: CGFloat(placement.height) * metrics.lineHeight
+                                )
+                                .offset(
+                                    x: GridMetrics.sideMargin + CGFloat(placement.col) * metrics.cellWidth,
+                                    y: GridMetrics.topPadding + CGFloat(placement.row) * metrics.lineHeight
+                                )
+                                .onTapGesture {
+                                    guard placement.index < home.connections.count else { return }
+                                    navigateToEntityInfo(home.connections[placement.index])
+                                }
+                        }
+                    }
+                }
 
                 Group {
                     if !appState.hasCompletedOnboarding {
@@ -156,9 +210,19 @@ struct ContentView: View {
                                 fg: GridColor.background.uiColor.swiftUI,
                                 bg: GridColor.bold.uiColor.swiftUI
                             ) {
-                                navigateTo(.home)
+                                goBack()
                             }
                             Spacer()
+                            if navManager.currentPage == .info,
+                               infoRenderer?.mode == .entity {
+                                NavTextButton(
+                                    label: "+ SUBJECT",
+                                    fg: GridColor.background.uiColor.swiftUI,
+                                    bg: GridColor.bold.uiColor.swiftUI
+                                ) {
+                                    makeEntitySubject()
+                                }
+                            }
                         }
                         .padding(.horizontal, 40)
                         .padding(.bottom, 16)
@@ -303,7 +367,8 @@ struct ContentView: View {
         home.hasObservations = true
         home.graphSubject = GraphSubject(label: result.subject.uppercased())
 
-        // Build graph items from connections
+        // Store connections and build graph items
+        home.connections = result.connections
         home.graphItems = result.connections.map { conn in
             GraphItem(
                 glyph: conn.entityType.glyph,
@@ -313,7 +378,7 @@ struct ContentView: View {
             )
         }
 
-        // Store bio and birthInfo for future detail view
+        // Store bio and birthInfo for detail view
         home.bio = result.bio
         home.birthInfo = result.birthInfo
 
@@ -334,6 +399,51 @@ struct ContentView: View {
     private func navigateTo(_ page: Page) {
         guard let targetRenderer = renderers[page] else { return }
         navManager.navigate(to: page, using: controller, renderer: targetRenderer)
+    }
+
+    private func navigateToInfo() {
+        guard let home = homeRenderer, let info = infoRenderer else { return }
+        info.configureForSubject(
+            name: home.graphSubject.label,
+            birthInfo: home.birthInfo,
+            bio: home.bio
+        )
+        navigateTo(.info)
+    }
+
+    private func navigateToEntityInfo(_ connection: CultureConnection) {
+        guard let info = infoRenderer else { return }
+        info.configureForEntity(connection)
+        navigateTo(.info)
+    }
+
+    private func goBack() {
+        let previousPage = navManager.pageStack.last ?? .home
+        guard let targetRenderer = renderers[previousPage] else { return }
+        navManager.goBack(using: controller, renderer: targetRenderer)
+    }
+
+    private func makeEntitySubject() {
+        guard let info = infoRenderer, info.mode == .entity else { return }
+        let entityName = info.entityName
+
+        // Reset nav stack to just home and go back
+        guard let home = homeRenderer else { return }
+        navManager.pageStack = [.home]
+        navManager.goBack(using: controller, renderer: home)
+
+        Task {
+            while navManager.isTransitioning {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            serviceManager.querySubject(entityName)
+            controller.enterCapture(
+                mode: .observing,
+                progress: serviceManager.progress,
+                audioService: serviceManager.audio,
+                onWipeOutComplete: {}
+            )
+        }
     }
 
     // MARK: - Onboarding Component Layer

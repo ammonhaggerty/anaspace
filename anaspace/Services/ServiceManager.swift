@@ -371,6 +371,43 @@ final class ServiceManager {
         progress.logEvent("Observation complete")
     }
 
+    // MARK: - Direct Query
+
+    /// Send a direct text query to Claude (e.g. from + SUBJECT button) without audio capture.
+    func querySubject(_ name: String) {
+        cancelAllTasks()
+        progress.reset()
+        progress.transitionTo(.processing)
+        progress.setLocation(location.currentResult)
+        progress.setClaudeProcessing(true)
+
+        claudeTask = Task {
+            do {
+                try await claude.activate()
+                guard claude.isAvailable else {
+                    progress.setClaudeProcessing(false)
+                    resolve()
+                    return
+                }
+                let signals = ObservationSignals(
+                    transcript: TranscriptResult(text: name, confidence: 1.0, isFinal: true),
+                    location: progress.location,
+                    mode: .hold,
+                    resolutionTrigger: .userRelease
+                )
+                let result = try await claude.processObservation(from: signals)
+                guard !Task.isCancelled else { return }
+                progress.setLatestResult(result)
+                progress.setClaudeProcessing(false)
+                resolve()
+            } catch {
+                progress.logEvent("Claude error: \(error)")
+                progress.setClaudeProcessing(false)
+                resolve()
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func updateHaptics() {

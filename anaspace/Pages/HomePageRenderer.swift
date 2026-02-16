@@ -8,6 +8,8 @@ final class HomePageRenderer: PageRenderer {
     var locationLabel: String = "OAKLAND, CA | USA"
     var graphSubject = GraphSubject(label: "")
     var graphItems: [GraphItem] = []
+    var connections: [CultureConnection] = []
+    var placements: [PlacedItem] = []
     var bio: String = ""
     var birthInfo: String = ""
 
@@ -52,7 +54,7 @@ final class HomePageRenderer: PageRenderer {
 
         // Radial graph below map area
         let layout = RadialGraphLayout()
-        layout.render(
+        placements = layout.render(
             subject: graphSubject,
             items: graphItems,
             into: grid,

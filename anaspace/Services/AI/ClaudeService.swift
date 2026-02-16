@@ -78,7 +78,7 @@ final class ClaudeService: ObservationService {
       "birthInfo": "B. YEAR, PLACE" or "EST. YEAR, PLACE" for groups,
       "place": "City, State | Country",
       "year": 1978,
-      "bio": "Two paragraphs, 600-800 characters total. First paragraph: what the subject was doing in this specific year. Second paragraph: the subject's connection to this specific place.",
+      "bio": "Two short paragraphs, 400-500 characters total. First paragraph: what the subject was doing in this specific year. Second paragraph: the subject's connection to this specific place.",
       "narrative": "One sentence connecting subject, place, and year.",
       "entities": [
         {
@@ -86,20 +86,30 @@ final class ClaudeService: ObservationService {
           "subtitle": "Optional short context (album name, venue nickname, etc.)" or null,
           "entityType": "collaborator|peer|influence|follower|creation|place|event|movement",
           "relationship": "Brief description of connection to subject",
-          "relevance": 0.95
+          "relevance": 0.95,
+          "description": "400-500 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity."
         }
       ]
     }
 
     ## Rules
     - Return 1-12 entities. Quality over quantity.
-    - Entity names: prefer 14 characters or fewer, 20 max. Use ALL CAPS.
+    - Entity names: Use the shortest recognizable title. Drop location qualifiers, \
+    descriptors, and modifiers that aren't part of the proper name. \
+    Examples: "MUSCLE SHOALS" not "MUSCLE SHOALS ALABAMA STUDIO", \
+    "BLACK PANTHERS" not "BLACK PANTHERS OAKLAND HQ", \
+    "ABBEY ROAD" not "ABBEY ROAD STUDIOS LONDON". \
+    Prefer 14 characters or fewer, 20 max. Use ALL CAPS.
     - Relevance: 0.0-1.0. Reserve 0.9+ for direct collaborators or defining works.
-    - Bio: Do NOT write a generic biography. Ground it in the specific year and place.
+    - Bio: 400-500 characters max. Do NOT write a generic biography. Ground it in the specific year and place.
+    - Entity descriptions: 400-500 characters. Explain this entity's specific connection to the subject \
+    in the stated year and place. Not a generic summary of the entity.
     - Subject: Always resolve to the primary artist/band, never a song or album title.
     - birthInfo: Use "B. YEAR, PLACE" for individuals, "EST. YEAR, PLACE" for groups/bands.
-    - Subtitles: Just the title itself (e.g. "Illmatic", "Abbey Road"). No format descriptors \
-    (no "Double Album", "LP", "Single", "Debut", etc.). Use for creation entities and place nicknames, or null.
+    - Subtitles: For creation entities, subtitle is null — the name IS the title. \
+    For non-creation entities, subtitle can be a short context note (e.g. venue nickname). \
+    Never include album names alongside song names or vice versa. Pick one creation per work. \
+    No format descriptors (no "Double Album", "LP", "Single", "Debut", etc.).
     """
 
     // MARK: - ObservationService Conformance
@@ -345,12 +355,14 @@ final class ClaudeService: ObservationService {
             let entityType = (item["entityType"] as? String)
                 .flatMap { EntityType(rawValue: $0) } ?? .peer
             let relevance = item["relevance"] as? Double ?? 0.5
+            let description = item["description"] as? String ?? ""
             return CultureConnection(
                 name: name,
                 subtitle: subtitle,
                 entityType: entityType,
                 relationship: relationship,
-                relevance: relevance
+                relevance: relevance,
+                description: description
             )
         }
     }
