@@ -2,8 +2,7 @@
 
 **A cultural exploration engine for iOS, built entirely with Claude Code.**
 
-<!-- TODO: Replace with demo video -->
-<!-- [![Demo Video](docs/assets/thumbnail.png)](https://youtube.com/watch?v=REPLACE_ME) -->
+<video src="https://github.com/ammonhaggerty/anaspace/releases/download/v0.1-demo/anaspace-submission.mp4" width="300"></video>
 
 > Press a button. The app listens to your world — identifies the song, hears your voice, knows where you are — and maps the cultural web connecting it all. Music, place, and time become coordinates in a living knowledge graph.
 
