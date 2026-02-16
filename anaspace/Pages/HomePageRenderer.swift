@@ -8,6 +8,8 @@ final class HomePageRenderer: PageRenderer {
     var locationLabel: String = "OAKLAND, CA | USA"
     var graphSubject = GraphSubject(label: "")
     var graphItems: [GraphItem] = []
+    var bio: String = ""
+    var birthInfo: String = ""
 
     var hiddenStructureRows: Set<Int> {
         hasObservations ? Set(0..<10) : []

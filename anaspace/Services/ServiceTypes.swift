@@ -117,16 +117,54 @@ struct ObservationSignals: Sendable {
     }
 }
 
+// MARK: - Entity Type
+
+enum EntityType: String, Codable, Sendable {
+    case collaborator
+    case peer
+    case influence
+    case follower
+    case creation    // songs, albums, works
+    case place       // venues, studios, landmarks
+    case event       // historical/cultural events
+    case movement    // genres, cultural movements
+
+    var glyph: Character {
+        switch self {
+        case .collaborator: return "\u{25A0}"  // ■ black square
+        case .peer:         return "\u{25AA}"  // ▪ black small square
+        case .influence:    return "\u{21A2}"  // ↢ leftwards arrow with tail
+        case .follower:     return "\u{21A3}"  // ↣ rightwards arrow with tail
+        case .creation:     return "\u{2B58}"  // ⭘ heavy circle
+        case .place:        return "\u{2207}"  // ∇ nabla
+        case .event:        return "\u{26A1}"  // ⚡ high voltage
+        case .movement:     return "\u{224B}"  // ≋ triple tilde
+        }
+    }
+}
+
+// MARK: - Culture Connection
+
+struct CultureConnection: Sendable {
+    let name: String
+    let subtitle: String?
+    let entityType: EntityType
+    let relationship: String
+    let relevance: Double
+}
+
 // MARK: - Claude Result
 
 struct ClaudeResult: Sendable {
     let subject: String
     let subjectType: String
+    let birthInfo: String
     let place: String
     let year: Int
+    let bio: String
     let narrative: String
     let connections: [CultureConnection]
-    let isStreaming: Bool  // true while SSE chunks are still arriving
+    let isStreaming: Bool
 }
 
 // MARK: - Service Configuration

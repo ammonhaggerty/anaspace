@@ -9,7 +9,15 @@ struct GraphSubject {
 struct GraphItem {
     let glyph: Character
     let label: String
+    let subtitle: String?
     let relevance: Float  // 0.0–1.0 (1.0 = most relevant, placed closest)
+
+    init(glyph: Character, label: String, subtitle: String? = nil, relevance: Float) {
+        self.glyph = glyph
+        self.label = label
+        self.subtitle = subtitle
+        self.relevance = relevance
+    }
 }
 
 // MARK: - Occupancy Grid
@@ -137,8 +145,16 @@ struct RadialGraphLayout {
             let lines = TextWrapper.wrap(item.label, maxWidth: 14, maxLines: 2)
             guard !lines.isEmpty else { continue }
 
-            let textWidth = lines.map(\.count).max() ?? 1
-            let blockH = 1 + lines.count  // glyph row + text rows
+            let subtitleLines: [String]
+            if let subtitle = item.subtitle {
+                subtitleLines = TextWrapper.wrap(subtitle, maxWidth: 14, maxLines: 1)
+            } else {
+                subtitleLines = []
+            }
+
+            let allTextLines = lines + subtitleLines
+            let textWidth = allTextLines.map(\.count).max() ?? 1
+            let blockH = 1 + allTextLines.count  // glyph row + label rows + subtitle rows
 
             // Target row distance from center: relevance 1.0 → 2 rows, 0.0 → edge
             let rowDist = Int(round(2.0 + (1.0 - item.relevance) * (halfHeight - 2.0)))
@@ -205,7 +221,7 @@ struct RadialGraphLayout {
                                 state: CellState(character: item.glyph, color: .bold, bold: false)
                             )
 
-                            for (lineIdx, line) in lines.enumerated() {
+                            for (lineIdx, line) in allTextLines.enumerated() {
                                 let r = tryRow + 1 + lineIdx
                                 guard r <= maxRow else { break }
                                 for (charIdx, ch) in line.enumerated() {

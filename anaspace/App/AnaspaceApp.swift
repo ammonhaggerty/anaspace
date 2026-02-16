@@ -305,8 +305,17 @@ struct ContentView: View {
 
         // Build graph items from connections
         home.graphItems = result.connections.map { conn in
-            GraphItem(glyph: "\u{25A0}", label: conn.name, relevance: Float(conn.relevance))
+            GraphItem(
+                glyph: conn.entityType.glyph,
+                label: conn.name,
+                subtitle: conn.subtitle,
+                relevance: Float(conn.relevance)
+            )
         }
+
+        // Store bio and birthInfo for future detail view
+        home.bio = result.bio
+        home.birthInfo = result.birthInfo
 
         selectedYear = result.year
 
