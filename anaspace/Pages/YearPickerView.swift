@@ -26,9 +26,9 @@ struct YearPickerView: View {
     private let navDark = GridColor.bold.uiColor.swiftUI
     private let navFg = GridColor.background.uiColor.swiftUI
 
-    // Pre-loaded digit images (dark and red-tinted)
+    // Pre-loaded digit images (dark and white-tinted for selection)
     private let digitImages: [UIImage]
-    private let redDigitImages: [UIImage]
+    private let selectedDigitImages: [UIImage]
 
     init(initialYear: Int, onYearSelected: @escaping (Int) -> Void, onDismiss: @escaping () -> Void) {
         self.initialYear = initialYear
@@ -37,15 +37,15 @@ struct YearPickerView: View {
         self._scrollPosition = State(initialValue: Double(initialYear))
 
         var images: [UIImage] = []
-        var redImages: [UIImage] = []
-        let red = GridColor.focus.uiColor
+        var selImages: [UIImage] = []
+        let white = GridColor.highlight.uiColor
         for i in 0...9 {
             let img = UIImage(named: "year\(i)") ?? UIImage()
             images.append(img)
-            redImages.append(Self.tintImage(img, with: red))
+            selImages.append(Self.tintImage(img, with: white))
         }
         self.digitImages = images
-        self.redDigitImages = redImages
+        self.selectedDigitImages = selImages
     }
 
     private var selectedYear: Int {
@@ -225,7 +225,7 @@ struct YearPickerView: View {
         let totalWidth = CGFloat(digits.count) * digitW
         let startX = rightEdge - totalWidth
         let top = centerY - height / 2
-        let imgs = isSelected ? redDigitImages : digitImages
+        let imgs = isSelected ? selectedDigitImages : digitImages
 
         for (i, digit) in digits.enumerated() {
             let rect = CGRect(

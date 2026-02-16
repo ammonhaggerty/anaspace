@@ -35,6 +35,12 @@ final class NavigationManager {
         }
     }
 
+    /// Reset to home without animation (e.g. before entering capture from a non-home page).
+    func resetToHome() {
+        pageStack.removeAll()
+        currentPage = .home
+    }
+
     // MARK: - Wipe Transition
 
     /// Standard page transition: wipe out cell-by-cell, swap content while covered, wipe in to reveal.

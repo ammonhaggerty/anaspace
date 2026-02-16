@@ -11,10 +11,17 @@ final class CaptureRenderer: NSObject {
 
     // MARK: - Signal Carousel
 
+    enum QueryContext {
+        case observation
+        case yearChange(Int)
+        case locationChange(String)
+        case subjectChange(String)
+    }
+
     struct SignalItem {
         let label: String   // e.g. "LOCATION"
         let value: String   // e.g. "OAKLAND, CA"
-        var text: String { "\(label): \(value)" }
+        var text: String { value.isEmpty ? label : "\(label): \(value)" }
     }
 
     private enum SignalPhase {
@@ -34,6 +41,8 @@ final class CaptureRenderer: NSObject {
 
     private weak var progress: ObservationProgress?
     private weak var audioService: AudioService?
+    private var contextYear: Int?
+    private var queryContext: QueryContext = .observation
 
     private var lastTranscriptText: String?
     private var cols: Int = 0
@@ -53,7 +62,7 @@ final class CaptureRenderer: NSObject {
 
     // MARK: - Public API
 
-    func start(on grid: CharacterGrid, mode: Mode, progress: ObservationProgress, audioService: AudioService) {
+    func start(on grid: CharacterGrid, mode: Mode, progress: ObservationProgress, audioService: AudioService, contextYear: Int? = nil, queryContext: QueryContext = .observation) {
         stop()
 
         self.grid = grid
@@ -64,6 +73,8 @@ final class CaptureRenderer: NSObject {
         self.lastTranscriptText = nil
         self.indicatorToggle = false
         self.lastIndicatorToggle = 0
+        self.contextYear = contextYear
+        self.queryContext = queryContext
         self.signals = []
         self.currentSignalIndex = 0
         self.signalPhase = .building
@@ -131,6 +142,18 @@ final class CaptureRenderer: NSObject {
     private func collectSignalsAndTransition(progress: ObservationProgress) {
         var items: [SignalItem] = []
 
+        // Contextual lead signal based on query type
+        switch queryContext {
+        case .observation:
+            break
+        case .yearChange(let year):
+            items.append(SignalItem(label: "FINDING RELATED FROM \(year)", value: ""))
+        case .locationChange(let location):
+            items.append(SignalItem(label: "FINDING RELATED IN \(location.uppercased())", value: ""))
+        case .subjectChange(let name):
+            items.append(SignalItem(label: "EXPLORING \(name.uppercased())", value: ""))
+        }
+
         // Location (always available)
         if let loc = progress.location {
             let label = LocationService.displayLabel(for: loc)
@@ -139,8 +162,10 @@ final class CaptureRenderer: NSObject {
             items.append(SignalItem(label: "LOCATION", value: "LOCATING..."))
         }
 
-        // Year (always current year)
-        let year = Calendar.current.component(.year, from: Date())
+        // Year: Shazam release year > context year > current year
+        let year = progress.shazamResult?.releaseYear
+            ?? contextYear
+            ?? Calendar.current.component(.year, from: Date())
         items.append(SignalItem(label: "YEAR", value: "\(year)"))
 
         // Shazam results

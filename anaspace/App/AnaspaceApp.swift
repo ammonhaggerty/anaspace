@@ -183,6 +183,7 @@ struct ContentView: View {
                                     mode: .observing,
                                     progress: serviceManager.progress,
                                     audioService: serviceManager.audio,
+                                    contextYear: selectedYear,
                                     onWipeOutComplete: {}
                                 )
                             },
@@ -267,8 +268,7 @@ struct ContentView: View {
                 onLocationSelected: { coordinate in
                     selectedCoordinate = coordinate
                     showMapSelection = false
-                    reverseGeocode(coordinate)
-                    refreshGrid()
+                    reverseGeocodeAndQuery(coordinate)
                 },
                 onDismiss: {
                     showMapSelection = false
@@ -279,9 +279,12 @@ struct ContentView: View {
             YearPickerView(
                 initialYear: selectedYear,
                 onYearSelected: { year in
+                    let changed = year != selectedYear
                     selectedYear = year
                     showYearPicker = false
-                    refreshGrid()
+                    if changed, homeRenderer?.hasObservations == true {
+                        queryWithYearChange()
+                    }
                 },
                 onDismiss: { showYearPicker = false }
             )
@@ -427,23 +430,60 @@ struct ContentView: View {
         guard let info = infoRenderer, info.mode == .entity else { return }
         let entityName = info.entityName
 
-        // Reset nav stack to just home and go back
-        guard let home = homeRenderer else { return }
-        navManager.pageStack = [.home]
-        navManager.goBack(using: controller, renderer: home)
+        // Reset nav to home silently — exitCapture will restore home content
+        navManager.resetToHome()
 
-        Task {
-            while navManager.isTransitioning {
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            serviceManager.querySubject(entityName)
-            controller.enterCapture(
-                mode: .observing,
-                progress: serviceManager.progress,
-                audioService: serviceManager.audio,
-                onWipeOutComplete: {}
-            )
-        }
+        // Go directly into capture/analysis from the current page
+        serviceManager.querySubject(entityName)
+        controller.enterCapture(
+            mode: .observing,
+            progress: serviceManager.progress,
+            audioService: serviceManager.audio,
+            contextYear: selectedYear,
+            queryContext: .subjectChange(entityName),
+            onWipeOutComplete: {}
+        )
+    }
+
+    private func queryWithYearChange() {
+        guard let home = homeRenderer, home.hasObservations else { return }
+        let subject = home.graphSubject.label
+        let location = home.locationLabel
+
+        // Year change: year + location are fixed, subject is flexible
+        serviceManager.queryYearChange(
+            subject: subject,
+            year: selectedYear,
+            location: location
+        )
+        controller.enterCapture(
+            mode: .observing,
+            progress: serviceManager.progress,
+            audioService: serviceManager.audio,
+            contextYear: selectedYear,
+            queryContext: .yearChange(selectedYear),
+            onWipeOutComplete: {}
+        )
+    }
+
+    private func queryWithLocationChange(newLocation: String) {
+        guard let home = homeRenderer, home.hasObservations else { return }
+        let subject = home.graphSubject.label
+
+        // Location change: subject + year are fixed, location is new
+        serviceManager.queryLocationChange(
+            subject: subject,
+            year: selectedYear,
+            location: newLocation
+        )
+        controller.enterCapture(
+            mode: .observing,
+            progress: serviceManager.progress,
+            audioService: serviceManager.audio,
+            contextYear: selectedYear,
+            queryContext: .locationChange(newLocation),
+            onWipeOutComplete: {}
+        )
     }
 
     // MARK: - Onboarding Component Layer
@@ -581,11 +621,17 @@ struct ContentView: View {
         UIApplication.shared.open(url)
     }
 
-    private func reverseGeocode(_ coordinate: CLLocationCoordinate2D) {
+    private func reverseGeocodeAndQuery(_ coordinate: CLLocationCoordinate2D) {
         Task {
             guard let result = await serviceManager.location.reverseGeocode(coordinate) else { return }
-            homeRenderer?.locationLabel = LocationService.displayLabel(for: result)
-            refreshGrid()
+            let newLabel = LocationService.displayLabel(for: result)
+            homeRenderer?.locationLabel = newLabel
+
+            if homeRenderer?.hasObservations == true {
+                queryWithLocationChange(newLocation: newLabel)
+            } else {
+                refreshGrid()
+            }
         }
     }
 }

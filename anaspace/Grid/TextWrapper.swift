@@ -76,7 +76,7 @@ enum TextWrapper {
     }
 
     /// Breaks a single word into fragments that fit within `maxWidth`,
-    /// adding hyphens at break points.
+    /// adding hyphens at break points. Prefers breaking at existing hyphens.
     private static func hyphenate(_ word: String, maxWidth: Int) -> [String] {
         guard word.count > maxWidth, maxWidth > 1 else { return [word] }
 
@@ -84,11 +84,34 @@ enum TextWrapper {
         var remaining = word
 
         while remaining.count > maxWidth {
-            // Take maxWidth - 1 chars + hyphen
-            let breakAt = remaining.index(remaining.startIndex, offsetBy: maxWidth - 1)
-            let fragment = String(remaining[..<breakAt]) + "-"
-            fragments.append(fragment)
-            remaining = String(remaining[breakAt...])
+            // Look for an existing hyphen within the fitting range.
+            // The hyphen itself can sit at the end of the line, so scan up to maxWidth chars.
+            let scanEnd = remaining.index(remaining.startIndex, offsetBy: maxWidth)
+            var bestBreak: String.Index?
+
+            // Walk backwards from the end of the fitting range looking for a hyphen
+            var idx = remaining.index(before: scanEnd)
+            while idx > remaining.startIndex {
+                if remaining[idx] == "-" {
+                    // Break right after the hyphen (it stays on this line)
+                    bestBreak = remaining.index(after: idx)
+                    break
+                }
+                idx = remaining.index(before: idx)
+            }
+
+            if let breakAt = bestBreak {
+                // Break at the existing hyphen — no extra hyphen needed
+                let fragment = String(remaining[..<breakAt])
+                fragments.append(fragment)
+                remaining = String(remaining[breakAt...])
+            } else {
+                // No hyphen found — hard break with added hyphen
+                let breakAt = remaining.index(remaining.startIndex, offsetBy: maxWidth - 1)
+                let fragment = String(remaining[..<breakAt]) + "-"
+                fragments.append(fragment)
+                remaining = String(remaining[breakAt...])
+            }
         }
 
         if !remaining.isEmpty {

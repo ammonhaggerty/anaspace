@@ -408,6 +408,68 @@ final class ServiceManager {
         }
     }
 
+    /// Query Claude with a year change — year and location are fixed, subject is flexible.
+    func queryYearChange(subject: String, year: Int, location: String) {
+        cancelAllTasks()
+        progress.reset()
+        progress.transitionTo(.processing)
+        progress.setLocation(self.location.currentResult)
+        progress.setClaudeProcessing(true)
+
+        claudeTask = Task {
+            do {
+                try await claude.activate()
+                guard claude.isAvailable else {
+                    progress.setClaudeProcessing(false)
+                    resolve()
+                    return
+                }
+                let result = try await claude.processYearChange(
+                    subject: subject, year: year, location: location
+                )
+                guard !Task.isCancelled else { return }
+                progress.setLatestResult(result)
+                progress.setClaudeProcessing(false)
+                resolve()
+            } catch {
+                progress.logEvent("Claude error: \(error)")
+                progress.setClaudeProcessing(false)
+                resolve()
+            }
+        }
+    }
+
+    /// Query Claude with a location change — subject and year are fixed, location is new.
+    func queryLocationChange(subject: String, year: Int, location: String) {
+        cancelAllTasks()
+        progress.reset()
+        progress.transitionTo(.processing)
+        progress.setLocation(self.location.currentResult)
+        progress.setClaudeProcessing(true)
+
+        claudeTask = Task {
+            do {
+                try await claude.activate()
+                guard claude.isAvailable else {
+                    progress.setClaudeProcessing(false)
+                    resolve()
+                    return
+                }
+                let result = try await claude.processLocationChange(
+                    subject: subject, year: year, location: location
+                )
+                guard !Task.isCancelled else { return }
+                progress.setLatestResult(result)
+                progress.setClaudeProcessing(false)
+                resolve()
+            } catch {
+                progress.logEvent("Claude error: \(error)")
+                progress.setClaudeProcessing(false)
+                resolve()
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func updateHaptics() {

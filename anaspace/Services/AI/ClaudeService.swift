@@ -43,7 +43,7 @@ final class ClaudeService: ObservationService {
 
     private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private let apiVersion = "2023-06-01"
-    private let model = ClaudeModel.sonnet
+    private let model = ClaudeModel.haiku
 
     // MARK: - System Prompt
 
@@ -93,7 +93,7 @@ final class ClaudeService: ObservationService {
     }
 
     ## Rules
-    - Return 1-12 entities. Quality over quantity.
+    - Return 1-10 entities. Quality over quantity.
     - Entity names: Use the shortest recognizable title. Drop location qualifiers, \
     descriptors, and modifiers that aren't part of the proper name. \
     Examples: "MUSCLE SHOALS" not "MUSCLE SHOALS ALABAMA STUDIO", \
@@ -122,6 +122,85 @@ final class ClaudeService: ObservationService {
     func deactivate() {}
 
     // MARK: - Public API
+
+    /// Query Claude with year and location fixed, finding the closest match to a subject's legacy.
+    func processYearChange(subject: String, year: Int, location: String) async throws -> ClaudeResult {
+        let userMessage = """
+        YEAR CHANGE: The user was exploring \(subject) and changed the year to \(year).
+        Location: \(location)
+
+        Year \(year) and location are FIXED — do not change them. Find the artist or musician \
+        most connected to \(subject)'s musical legacy, lineage, or spirit who was active in \
+        \(location) in \(year). This could be a direct collaborator, a successor carrying their \
+        influence, or an artist who embodies a similar cultural role in that era and place. \
+        The subject should NOT be \(subject) themselves unless they were genuinely active there in \(year). \
+        Build the culture map around this new subject, anchored to \(year) and \(location).
+        """
+        print("[Claude] Request: \(userMessage)")
+
+        let request = try buildRequest(userMessage: userMessage)
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            print("[Claude] API error \(httpResponse.statusCode): \(body)")
+            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        let text = extractResponseText(from: json)
+        print("[Claude] Response: \(text)")
+        return parseClaudeResponse(text)
+    }
+
+    /// Query Claude with location change — subject and year are fixed, location is new.
+    /// Encourages finding a local equivalent artist over showing the same artist in the new place.
+    func processLocationChange(subject: String, year: Int, location: String) async throws -> ClaudeResult {
+        let userMessage = """
+        LOCATION CHANGE: The user was exploring \(subject) in \(year) and moved to \(location).
+        Subject: \(subject) | Year: \(year) | New location: \(location)
+
+        Year \(year) is FIXED — do not change it. The new location \(location) is FIXED. \
+        Your primary goal: find the LOCAL artist or musician in \(location) who best represents \
+        the musical lineage, spirit, or cultural role of \(subject) in \(year). \
+        STRONGLY prefer a local artist — someone who was born in, based in, or primarily associated \
+        with \(location). A local equivalent is almost always more interesting than showing \(subject) \
+        in a new city. \
+        Only keep \(subject) as the subject if they have a genuine, specific connection to \(location) \
+        in \(year) (e.g., they lived there, recorded there, performed a landmark show there). \
+        A generic "their music was popular worldwide" is NOT a sufficient connection. \
+        Build the culture map around this subject, anchored to \(year) and \(location).
+        """
+        print("[Claude] Request: \(userMessage)")
+
+        let request = try buildRequest(userMessage: userMessage)
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            print("[Claude] API error \(httpResponse.statusCode): \(body)")
+            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        let text = extractResponseText(from: json)
+        print("[Claude] Response: \(text)")
+        return parseClaudeResponse(text)
+    }
 
     /// Send observation signals to Claude and return a single result.
     func processObservation(from signals: ObservationSignals) async throws -> ClaudeResult {

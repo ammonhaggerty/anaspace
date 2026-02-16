@@ -28,6 +28,8 @@ final class GridController {
         mode: CaptureRenderer.Mode,
         progress: ObservationProgress,
         audioService: AudioService,
+        contextYear: Int? = nil,
+        queryContext: CaptureRenderer.QueryContext = .observation,
         onWipeOutComplete: @escaping () -> Void
     ) {
         guard let grid, !isCapturing else { return }
@@ -60,7 +62,9 @@ final class GridController {
                 on: grid,
                 mode: effectiveMode,
                 progress: progress,
-                audioService: audioService
+                audioService: audioService,
+                contextYear: contextYear,
+                queryContext: queryContext
             )
 
             // Only run ObserveAnimation for observing mode (not listening)
