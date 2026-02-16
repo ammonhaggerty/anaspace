@@ -134,8 +134,8 @@ struct ContentView: View {
                        homeRenderer?.hasObservations == true,
                        let metrics = controller.metrics {
                         let graphStartRow = 11
-                        let areaRows = controller.grid?.rowCount ?? 40
-                        let centerRow = graphStartRow + (areaRows - graphStartRow) / 2 - 1
+                        let graphEndRow = (controller.grid?.rowCount ?? 40) - 2
+                        let centerRow = graphStartRow + (graphEndRow - graphStartRow) / 2 - 1
                         Color.clear
                             .contentShape(Rectangle())
                             .frame(
@@ -199,6 +199,48 @@ struct ContentView: View {
                                     }
                             }
                         }
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    // Play/Stop button overlay for audio player
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
+                       navManager.currentPage == .home,
+                       serviceManager.audioPlayer.state != .idle || !serviceManager.audioPlayer.queue.isEmpty,
+                       let metrics = controller.metrics,
+                       let grid = controller.grid {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(
+                                width: CGFloat(3) * metrics.cellWidth,
+                                height: metrics.lineHeight
+                            )
+                            .offset(
+                                x: GridMetrics.sideMargin + CGFloat(27) * metrics.cellWidth,
+                                y: GridMetrics.topPadding + CGFloat(grid.rowCount - 1) * metrics.lineHeight
+                            )
+                            .onTapGesture { serviceManager.audioPlayer.togglePlayStop() }
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    // Skip button overlay for audio player
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
+                       navManager.currentPage == .home,
+                       serviceManager.audioPlayer.state == .playing,
+                       let metrics = controller.metrics,
+                       let grid = controller.grid {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(
+                                width: CGFloat(3) * metrics.cellWidth,
+                                height: metrics.lineHeight
+                            )
+                            .offset(
+                                x: GridMetrics.sideMargin + CGFloat(30) * metrics.cellWidth,
+                                y: GridMetrics.topPadding + CGFloat(grid.rowCount - 1) * metrics.lineHeight
+                            )
+                            .onTapGesture { serviceManager.audioPlayer.skip() }
                     }
                 }
 
@@ -270,6 +312,7 @@ struct ContentView: View {
         .statusBarHidden()
         .task {
             historyStore.load()
+            serviceManager.appState = appState
             await serviceManager.refreshPermissions()
             onboardingRenderer.permissions = serviceManager.permissions
         }
@@ -284,6 +327,16 @@ struct ContentView: View {
                         refreshOnboardingGrid()
                     }
                 }
+            }
+        }
+        .onChange(of: serviceManager.audioPlayer.state) { _, newState in
+            if newState == .playing, navManager.currentPage == .home {
+                if let grid = controller.grid {
+                    serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
+                }
+                serviceManager.audioPlayer.startDisplayUpdates()
+            } else if newState == .idle {
+                serviceManager.audioPlayer.stopDisplayUpdates()
             }
         }
         .onChange(of: serviceManager.progress.latestResult?.narrative) { _, _ in
@@ -362,12 +415,18 @@ struct ContentView: View {
 
             if navManager.currentPage == .options {
                 if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
+                    let autoplayLabel = appState.autoplayEnabled ? "AUTOPLAY   ON" : "AUTOPLAY  OFF"
+                    let labels = [autoplayLabel, "LOG OUT", "UNLINK", "DOWNLOAD DATA"]
                     let rows = optionsRenderer.settingsRows
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                        let labels = ["LOG OUT", "UNLINK", "DOWNLOAD DATA"]
                         if index < labels.count {
-                            GridButton(label: labels[index], metrics: metrics)
-                                .gridAligned(row: row, col: 1, metrics: metrics)
+                            GridButton(label: labels[index], metrics: metrics) {
+                                if index == 0 {
+                                    appState.autoplayEnabled.toggle()
+                                    refreshGrid()
+                                }
+                            }
+                            .gridAligned(row: row, col: 1, metrics: metrics)
                         }
                     }
                 }
@@ -379,8 +438,17 @@ struct ContentView: View {
 
     private func populateGrid(_ grid: CharacterGrid) {
         if appState.hasCompletedOnboarding {
+            // Sync autoplay state for options page
+            if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
+                optionsRenderer.autoplayEnabled = appState.autoplayEnabled
+            }
             currentRenderer.renderStructure(into: grid)
             currentRenderer.renderContent(into: grid)
+            // Render audio player row on home page
+            if navManager.currentPage == .home {
+                serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
+                serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
+            }
         } else {
             // Content first — computes hiddenStructureRows for buttons
             onboardingRenderer.renderContent(into: grid)
@@ -391,10 +459,19 @@ struct ContentView: View {
 
     private func refreshGrid() {
         guard let grid = controller.grid else { return }
+        // Sync autoplay state for options page
+        if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
+            optionsRenderer.autoplayEnabled = appState.autoplayEnabled
+        }
         grid.clearLayer(.content)
         grid.clearLayer(.structure)
         currentRenderer.renderStructure(into: grid)
         currentRenderer.renderContent(into: grid)
+        // Render audio player row on home page
+        if navManager.currentPage == .home {
+            serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
+            serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
+        }
         grid.render()
     }
 

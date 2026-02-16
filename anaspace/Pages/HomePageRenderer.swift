@@ -59,7 +59,7 @@ final class HomePageRenderer: PageRenderer {
             items: graphItems,
             into: grid,
             startRow: 11,
-            endRow: grid.rowCount - 1
+            endRow: grid.rowCount - 2
         )
     }
 

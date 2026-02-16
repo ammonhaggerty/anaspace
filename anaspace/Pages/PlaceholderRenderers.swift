@@ -74,33 +74,41 @@ final class OptionsPageRenderer: PageRenderer {
     /// Row positions of settings labels, populated after render.
     private(set) var settingsRows: [Int] = []
 
+    /// Set before rendering to reflect current autoplay state.
+    var autoplayEnabled: Bool = false
+
     private let layout = FormalContentLayout()
 
-    private let sections: [ContentSection] = [
-        .spacer,
-        .header("ANASPACE"),
-        .spacer,
-        .header("KEY"),
-        .spacer,
-        .splitColumns([
-            ("\u{25A0}", "COLLABORATOR"),  // ■
-            ("\u{25AA}", "PEER"),           // ▪
-            ("\u{21A2}", "INFLUENCE"),      // ↢
-            ("\u{21A3}", "FOLLOWER"),       // ↣
-            ("\u{2B58}", "CREATION"),       // ⭘
-            ("\u{2207}", "PLACE"),          // ∇
-            ("\u{26A1}", "EVENT"),          // ⚡
-            ("\u{224B}", "MOVEMENT"),       // ≋
-        ]),
-        .spacer,
-        .header("SETTINGS"),
-        .spacer,
-        .settingsLabel("LOG OUT"),
-        .spacer,
-        .settingsLabel("UNLINK"),
-        .spacer,
-        .settingsLabel("DOWNLOAD DATA"),
-    ]
+    private var sections: [ContentSection] {
+        let autoplayLabel = autoplayEnabled ? "AUTOPLAY   ON" : "AUTOPLAY  OFF"
+        return [
+            .spacer,
+            .header("ANASPACE"),
+            .spacer,
+            .header("KEY"),
+            .spacer,
+            .splitColumns([
+                ("\u{25A0}", "COLLABORATOR"),  // ■
+                ("\u{25AA}", "PEER"),           // ▪
+                ("\u{21A2}", "INFLUENCE"),      // ↢
+                ("\u{21A3}", "FOLLOWER"),       // ↣
+                ("\u{2B58}", "CREATION"),       // ⭘
+                ("\u{2207}", "PLACE"),          // ∇
+                ("\u{26A1}", "EVENT"),          // ⚡
+                ("\u{224B}", "MOVEMENT"),       // ≋
+            ]),
+            .spacer,
+            .header("SETTINGS"),
+            .spacer,
+            .settingsLabel(autoplayLabel),
+            .spacer,
+            .settingsLabel("LOG OUT"),
+            .spacer,
+            .settingsLabel("UNLINK"),
+            .spacer,
+            .settingsLabel("DOWNLOAD DATA"),
+        ]
+    }
 
     func renderStructure(into grid: CharacterGrid) {
         let cols = GridMetrics.columns

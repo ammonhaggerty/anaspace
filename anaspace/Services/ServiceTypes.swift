@@ -210,6 +210,25 @@ struct ServiceConfiguration: Sendable {
     }
 }
 
+// MARK: - Player State
+
+enum PlayerState: Sendable, Equatable {
+    case idle
+    case loading
+    case playing
+    case paused
+    case fading
+}
+
+// MARK: - Track Info
+
+struct TrackInfo: Sendable {
+    let artist: String
+    let title: String
+    let year: Int
+    let previewURL: URL
+}
+
 // MARK: - Service Error
 
 enum ServiceError: Error {

@@ -12,9 +12,14 @@ final class ServiceManager {
     let speech = SpeechService()
     let music = MusicService()
     let claude = ClaudeService()
+    let audioPlayer = AudioPlayerService()
+    let queueBuilder: MusicQueueBuilder
 
     // Configuration
     let config = ServiceConfiguration()
+
+    /// Set by ContentView so ServiceManager can check autoplay preference.
+    weak var appState: AppState?
 
     // Progress — single observable surface for the UI
     let progress = ObservationProgress()
@@ -31,6 +36,7 @@ final class ServiceManager {
     private var captureStartTime: Date?
 
     init() {
+        queueBuilder = MusicQueueBuilder(music: music)
         shazam.audioService = audio
         soundAnalysis.audioService = audio
         speech.audioService = audio
@@ -45,6 +51,9 @@ final class ServiceManager {
 
     /// Begin capture — always starts as tap mode.
     func beginCapture() async {
+        // Fade out audio player before capture
+        audioPlayer.beginFadeAndPrepareForCapture()
+
         // Cancel any in-flight observation
         cancelAllTasks()
         deactivateAll()
@@ -369,12 +378,31 @@ final class ServiceManager {
         progress.setSoundAnalysisActive(false)
         progress.transitionTo(.resolved)
         progress.logEvent("Observation complete")
+
+        // Build audio player queue from results
+        if let result = progress.latestResult {
+            Task {
+                // Ensure MusicKit authorization before searching catalog
+                if !music.isAuthorized {
+                    await permissions.requestAppleMusic()
+                }
+                guard music.isAuthorized else { return }
+
+                let stream = queueBuilder.buildQueue(
+                    from: result,
+                    shazamResult: progress.shazamResult,
+                    year: result.year
+                )
+                audioPlayer.loadFromStream(stream, autoplay: appState?.autoplayEnabled ?? false)
+            }
+        }
     }
 
     // MARK: - Direct Query
 
     /// Send a direct text query to Claude (e.g. from + SUBJECT button) without audio capture.
     func querySubject(_ name: String) {
+        audioPlayer.beginFadeAndPrepareForCapture()
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
@@ -410,6 +438,7 @@ final class ServiceManager {
 
     /// Query Claude with a year change — year and location are fixed, subject is flexible.
     func queryYearChange(subject: String, year: Int, location: String) {
+        audioPlayer.beginFadeAndPrepareForCapture()
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
@@ -441,6 +470,7 @@ final class ServiceManager {
 
     /// Query Claude with a location change — subject and year are fixed, location is new.
     func queryLocationChange(subject: String, year: Int, location: String, locationResult: LocationResult? = nil) {
+        audioPlayer.beginFadeAndPrepareForCapture()
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)

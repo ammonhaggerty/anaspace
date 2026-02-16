@@ -53,6 +53,59 @@ final class MusicService: ObservationService {
             return nil
         }
     }
+    // MARK: - Catalog Search for Previews
+
+    /// Search for songs by an artist near a given year, returning tracks with preview URLs.
+    func searchSongs(artist: String, near year: Int, limit: Int = 5) async -> [TrackInfo] {
+        guard isAuthorized else { return [] }
+
+        do {
+            var request = MusicCatalogSearchRequest(term: artist, types: [Song.self])
+            request.limit = 25
+
+            let response = try await request.response()
+
+            let tracks: [TrackInfo] = response.songs.compactMap { song in
+                guard let previewURL = song.previewAssets?.first?.url else { return nil }
+                let songYear = song.releaseDate.map { Calendar.current.component(.year, from: $0) } ?? 0
+                return TrackInfo(
+                    artist: song.artistName,
+                    title: song.title,
+                    year: songYear,
+                    previewURL: previewURL
+                )
+            }
+
+            // Sort by proximity to target year
+            let sorted = tracks.sorted { abs($0.year - year) < abs($1.year - year) }
+            return Array(sorted.prefix(limit))
+        } catch {
+            return []
+        }
+    }
+
+    /// Look up a specific song by Apple Music ID and return its preview info.
+    func getSongByID(_ appleMusicID: String) async -> TrackInfo? {
+        guard isAuthorized else { return nil }
+
+        do {
+            let request = MusicCatalogResourceRequest<Song>(matching: \.id, equalTo: MusicItemID(appleMusicID))
+            let response = try await request.response()
+
+            guard let song = response.items.first,
+                  let previewURL = song.previewAssets?.first?.url else { return nil }
+
+            let songYear = song.releaseDate.map { Calendar.current.component(.year, from: $0) } ?? 0
+            return TrackInfo(
+                artist: song.artistName,
+                title: song.title,
+                year: songYear,
+                previewURL: previewURL
+            )
+        } catch {
+            return nil
+        }
+    }
 }
 
 // MARK: - Enrichment Data

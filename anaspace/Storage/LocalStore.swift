@@ -6,6 +6,7 @@ final class LocalStore {
 
     private let defaults = UserDefaults.standard
     private let onboardingKey = "hasCompletedOnboarding"
+    private let autoplayKey = "autoplayEnabled"
 
     private var engagementFileURL: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -20,6 +21,20 @@ final class LocalStore {
 
     func saveOnboardingComplete(_ value: Bool) {
         defaults.set(value, forKey: onboardingKey)
+    }
+
+    // MARK: - Autoplay
+
+    func loadAutoplay() -> Bool {
+        // Default to true if never set
+        if defaults.object(forKey: autoplayKey) == nil {
+            return true
+        }
+        return defaults.bool(forKey: autoplayKey)
+    }
+
+    func saveAutoplay(_ value: Bool) {
+        defaults.set(value, forKey: autoplayKey)
     }
 
     // MARK: - Preferences
