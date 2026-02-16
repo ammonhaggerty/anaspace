@@ -15,6 +15,9 @@ final class AudioPlayerService {
     private(set) var trackDuration: Int = 30
     private(set) var secondsRemaining: Int = 30
 
+    /// Session-level pause flag. Set when user manually pauses, cleared on play or new observation.
+    private var userPaused: Bool = false
+
     // MARK: - Engine
 
     private var engine: AVAudioEngine?
@@ -37,6 +40,7 @@ final class AudioPlayerService {
 
     func play() {
         guard state == .paused || (state == .idle && !queue.isEmpty) else { return }
+        userPaused = false
         if state == .paused {
             playerNode?.play()
             playbackStartDate = Date.now
@@ -48,6 +52,7 @@ final class AudioPlayerService {
     }
 
     func stop() {
+        userPaused = true
         // Save elapsed time for resume
         if let start = playbackStartDate {
             pausedElapsed += Date.now.timeIntervalSince(start)
@@ -79,6 +84,11 @@ final class AudioPlayerService {
         queue = tracks
     }
 
+    /// Reset session pause state. Call when a new observation starts.
+    func resetSessionPause() {
+        userPaused = false
+    }
+
     func loadFromStream(_ stream: AsyncStream<TrackInfo>, autoplay: Bool) {
         streamTask?.cancel()
         downloadTask?.cancel()
@@ -103,7 +113,7 @@ final class AudioPlayerService {
                 queue.append(track)
                 if first {
                     first = false
-                    if autoplay {
+                    if autoplay && !self.userPaused {
                         playNext()
                     } else {
                         // Render once to show idle-with-content state (ticker, controls)

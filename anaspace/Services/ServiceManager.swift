@@ -393,6 +393,7 @@ final class ServiceManager {
         entityPlaylistName = nil
         savedGeneralQueue = []
         savedGeneralTrack = nil
+        audioPlayer.resetSessionPause()
         Task {
             if !music.isAuthorized {
                 await permissions.requestAppleMusic()

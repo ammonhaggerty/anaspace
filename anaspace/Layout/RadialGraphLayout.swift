@@ -108,10 +108,10 @@ struct RadialGraphLayout {
 
         let subjectLabel = subject.label.uppercased()
         let subjectText: String
-        if let firstLine = TextWrapper.wrap(subjectLabel, maxWidth: 14, maxLines: 1).first {
+        if let firstLine = TextWrapper.wrap(subjectLabel, maxWidth: 26, maxLines: 1).first {
             subjectText = firstLine
         } else {
-            subjectText = String(subjectLabel.prefix(14))
+            subjectText = String(subjectLabel.prefix(26))
         }
 
         let subLabelStart = max(minCol, centerCol - subjectText.count / 2)
@@ -141,6 +141,49 @@ struct RadialGraphLayout {
                 row: subLabelRow, col: subLabelStart,
                 width: min(subjectText.count, maxCol - subLabelStart + 1), height: 1
             )
+        }
+
+        // --- Bracket decoration around subject ---
+        let bracketLeft = max(minCol, subLabelStart - 1)
+        let bracketRight = min(maxCol, subLabelStart + subjectText.count)
+
+        // Top bracket corners (same row as glyph)
+        grid.setCell(
+            layer: .content, row: startRow + centerRow, col: bracketLeft,
+            state: CellState(character: "\u{23A1}", color: .bold, bold: false)  // ⎡
+        )
+        grid.setCell(
+            layer: .content, row: startRow + centerRow, col: bracketRight,
+            state: CellState(character: "\u{23A4}", color: .bold, bold: false)  // ⎤
+        )
+        occupancy.mark(row: centerRow, col: bracketLeft, width: 1, height: 1)
+        occupancy.mark(row: centerRow, col: bracketRight, width: 1, height: 1)
+
+        // Middle bracket extensions (same row as label)
+        if subLabelRow <= maxRow {
+            grid.setCell(
+                layer: .content, row: startRow + subLabelRow, col: bracketLeft,
+                state: CellState(character: "\u{2502}", color: .bold, bold: false)  // │
+            )
+            grid.setCell(
+                layer: .content, row: startRow + subLabelRow, col: bracketRight,
+                state: CellState(character: "\u{2502}", color: .bold, bold: false)  // │
+            )
+        }
+
+        // Bottom bracket corners (one row below label)
+        let bottomBracketRow = subLabelRow + 1
+        if bottomBracketRow <= maxRow {
+            grid.setCell(
+                layer: .content, row: startRow + bottomBracketRow, col: bracketLeft,
+                state: CellState(character: "\u{23A3}", color: .bold, bold: false)  // ⎣
+            )
+            grid.setCell(
+                layer: .content, row: startRow + bottomBracketRow, col: bracketRight,
+                state: CellState(character: "\u{23A6}", color: .bold, bold: false)  // ⎦
+            )
+            occupancy.mark(row: bottomBracketRow, col: bracketLeft, width: 1, height: 1)
+            occupancy.mark(row: bottomBracketRow, col: bracketRight, width: 1, height: 1)
         }
 
         // --- Place items ---

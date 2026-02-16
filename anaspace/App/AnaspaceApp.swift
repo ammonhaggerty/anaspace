@@ -182,12 +182,29 @@ struct ContentView: View {
                     }
                 }
                 .overlay(alignment: .topLeading) {
-                    // Tap overlays for history entries
+                    // Tap overlays for history page
                     if appState.hasCompletedOnboarding,
                        !controller.isCapturing,
                        navManager.currentPage == .history,
                        let history = historyRenderer,
                        let metrics = controller.metrics {
+                        // Reset button (3-row bracket area)
+                        if history.resetButtonRow >= 0 {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .frame(
+                                    width: CGFloat(GridMetrics.columns) * metrics.cellWidth,
+                                    height: CGFloat(3) * metrics.lineHeight
+                                )
+                                .offset(
+                                    x: GridMetrics.sideMargin,
+                                    y: GridMetrics.topPadding + CGFloat(history.resetButtonRow) * metrics.lineHeight
+                                )
+                                .onTapGesture {
+                                    resetToObservePage()
+                                }
+                        }
+                        // History entries
                         ForEach(Array(history.entryRows.enumerated()), id: \.offset) { index, row in
                             if index < history.entries.count {
                                 Color.clear
@@ -231,6 +248,55 @@ struct ContentView: View {
                                     handleIdeaCardTap(index: index)
                                 }
                         }
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    // Tap overlay for GitHub link on options page
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
+                       navManager.currentPage == .options,
+                       let opts = renderers[.options] as? OptionsPageRenderer,
+                       opts.githubLinkRow >= 0,
+                       let metrics = controller.metrics {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(
+                                width: CGFloat(opts.githubLinkEndCol - opts.githubLinkStartCol + 1) * metrics.cellWidth,
+                                height: metrics.lineHeight
+                            )
+                            .offset(
+                                x: GridMetrics.sideMargin + CGFloat(opts.githubLinkStartCol) * metrics.cellWidth,
+                                y: GridMetrics.topPadding + CGFloat(opts.githubLinkRow) * metrics.lineHeight
+                            )
+                            .onTapGesture {
+                                if let url = URL(string: "https://github.com/ammonhaggerty/anaspace") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    // Tap overlay for autoplay toggle on options page
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
+                       navManager.currentPage == .options,
+                       let opts = renderers[.options] as? OptionsPageRenderer,
+                       opts.toggleRow >= 0,
+                       let metrics = controller.metrics {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(
+                                width: CGFloat(GridMetrics.columns) * metrics.cellWidth,
+                                height: metrics.lineHeight
+                            )
+                            .offset(
+                                x: GridMetrics.sideMargin,
+                                y: GridMetrics.topPadding + CGFloat(opts.toggleRow) * metrics.lineHeight
+                            )
+                            .onTapGesture {
+                                appState.autoplayEnabled.toggle()
+                                refreshGrid()
+                            }
                     }
                 }
                 .overlay(alignment: .topLeading) {
@@ -443,24 +509,7 @@ struct ContentView: View {
                     .gridAligned(row: 1, col: cols - 8, metrics: metrics)
             }
 
-            if navManager.currentPage == .options {
-                if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
-                    let autoplayLabel = appState.autoplayEnabled ? "AUTOPLAY   ON" : "AUTOPLAY  OFF"
-                    let labels = [autoplayLabel, "LOG OUT", "UNLINK", "DOWNLOAD DATA"]
-                    let rows = optionsRenderer.settingsRows
-                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                        if index < labels.count {
-                            GridButton(label: labels[index], metrics: metrics) {
-                                if index == 0 {
-                                    appState.autoplayEnabled.toggle()
-                                    refreshGrid()
-                                }
-                            }
-                            .gridAligned(row: row, col: 1, metrics: metrics)
-                        }
-                    }
-                }
-            }
+            // Options page: no SwiftUI buttons — tap overlays handle interactions
         }
     }
 
@@ -585,6 +634,16 @@ struct ContentView: View {
         }
 
         navigateTo(.info)
+    }
+
+    private func resetToObservePage() {
+        guard let home = homeRenderer else { return }
+        home.hasObservations = false
+        activeHistoryEntryId = nil
+        refreshCircaYear()
+
+        guard let targetRenderer = renderers[.home] else { return }
+        navManager.navigateToHome(using: controller, renderer: targetRenderer)
     }
 
     private func goBack() {

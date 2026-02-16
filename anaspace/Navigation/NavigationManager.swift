@@ -41,6 +41,17 @@ final class NavigationManager {
         currentPage = .home
     }
 
+    /// Navigate to home with a wipe transition, clearing the page stack.
+    func navigateToHome(using controller: GridController, renderer: PageRenderer) {
+        guard !isTransitioning, currentPage != .home else { return }
+        isTransitioning = true
+        pageStack.removeAll()
+
+        performWipeTransition(using: controller, renderer: renderer) { [weak self] in
+            self?.currentPage = .home
+        }
+    }
+
     // MARK: - Wipe Transition
 
     /// Standard page transition: wipe out cell-by-cell, swap content while covered, wipe in to reveal.
