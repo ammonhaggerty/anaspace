@@ -12,12 +12,13 @@ struct BottomNavBar: View {
 
     private let navDark = GridColor.bold.uiColor.swiftUI
     private let bg = GridColor.background.uiColor.swiftUI
+    private let tint = GridColor.tint.uiColor.swiftUI
     private let red = GridColor.focus.uiColor.swiftUI
 
     var body: some View {
         HStack {
             if !isObserving {
-                NavButton(iconName: "icon-history", fg: bg, bg: navDark, onTap: onHistoryTap)
+                NavButton(iconName: "icon-history", fg: tint, bg: navDark, onTap: onHistoryTap)
             }
 
             Spacer()
@@ -35,7 +36,7 @@ struct BottomNavBar: View {
             Spacer()
 
             if !isObserving {
-                NavButton(iconName: "icon-options", fg: bg, bg: navDark, onTap: onOptionsTap)
+                NavButton(iconName: "icon-options", fg: tint, bg: navDark, onTap: onOptionsTap)
             }
         }
         .padding(.horizontal, 40)

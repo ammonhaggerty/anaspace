@@ -20,7 +20,7 @@ final class HomePageRenderer: PageRenderer {
     var ideaCardRegions: [(row: Int, col: Int, width: Int, height: Int)] = []
 
     var hiddenStructureRows: Set<Int> {
-        hasObservations ? Set(0..<10) : []
+        hasObservations ? Set(0..<11) : []
     }
 
     func renderStructure(into grid: CharacterGrid) {
@@ -58,13 +58,13 @@ final class HomePageRenderer: PageRenderer {
             )
         }
 
-        // Radial graph below map area
+        // Radial graph below map area (starts at row 12, skipping one row gap)
         let layout = RadialGraphLayout()
         placements = layout.render(
             subject: graphSubject,
             items: graphItems,
             into: grid,
-            startRow: 11,
+            startRow: 12,
             endRow: grid.rowCount - 2
         )
     }

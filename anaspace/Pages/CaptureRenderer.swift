@@ -166,11 +166,10 @@ final class CaptureRenderer: NSObject {
             items.append(SignalItem(label: "LOCATION", value: "LOCATING..."))
         }
 
-        // Year: Shazam release year > context year > current year
-        let year = progress.shazamResult?.releaseYear
-            ?? contextYear
-            ?? Calendar.current.component(.year, from: Date())
-        items.append(SignalItem(label: "YEAR", value: "\(year)"))
+        // Year: only show if known (Shazam match or explicit context year)
+        if let year = progress.shazamResult?.releaseYear ?? contextYear {
+            items.append(SignalItem(label: "YEAR", value: "\(year)"))
+        }
 
         // Shazam results
         if let shazam = progress.shazamResult {

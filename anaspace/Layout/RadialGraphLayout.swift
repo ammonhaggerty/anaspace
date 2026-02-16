@@ -45,7 +45,6 @@ private struct OccupancyGrid {
         self.occupied = Array(repeating: Array(repeating: false, count: cols), count: rows)
     }
 
-    /// Check placement with asymmetric padding: `hPad` cols horizontal, `vPad` rows vertical.
     func canPlace(row: Int, col: Int, width: Int, height: Int, hPad: Int = 2, vPad: Int = 1) -> Bool {
         let minR = row - vPad
         let maxR = row + height - 1 + vPad
@@ -81,8 +80,7 @@ private struct OccupancyGrid {
 @MainActor
 struct RadialGraphLayout {
 
-    // Aspect ratio: cols are narrower than rows are tall in the monospace grid
-    private let colScale: Float = 0.6
+    private let goldenRatio: Float = 1.618034
 
     @discardableResult
     func render(
@@ -96,7 +94,6 @@ struct RadialGraphLayout {
         let areaCols = GridMetrics.columns
         guard areaRows > 4, areaCols > 4 else { return [] }
 
-        // 1-cell inset margin on all sides
         let minRow = 1
         let maxRow = areaRows - 2
         let minCol = 1
@@ -153,9 +150,6 @@ struct RadialGraphLayout {
             .sorted { $0.element.relevance > $1.element.relevance }
         let halfHeight = Float(centerRow - minRow)
 
-        // Golden ratio for horizontal variety
-        let goldenRatio: Float = 1.618034
-
         for (index, entry) in sorted.enumerated() {
             let originalIndex = entry.offset
             let item = entry.element
@@ -171,55 +165,88 @@ struct RadialGraphLayout {
 
             let allTextLines = lines + subtitleLines
             let textWidth = allTextLines.map(\.count).max() ?? 1
-            let blockH = 1 + allTextLines.count  // glyph row + label rows + subtitle rows
+            let blockH = 1 + allTextLines.count
 
-            // Target row distance from center: relevance 1.0 → 2 rows, 0.0 → edge
+            // Target row distance from center
             let rowDist = Int(round(2.0 + (1.0 - item.relevance) * (halfHeight - 2.0)))
 
-            // Always target above center first; overflow spills below
-            let targetRow = centerRow - rowDist
+            // Alternate sides: even→left, odd→right
+            let isLeftSide = index % 2 == 0
 
-            // Column bias from golden ratio — spreads items left/right organically
-            let colBias = Float(index) * goldenRatio
-            let biasedCol = Int(Float(minCol) + colBias.truncatingRemainder(dividingBy: Float(maxCol - minCol)))
+            // --- Compute text start column directly ---
+            // Left items: left-aligned (text starts near left margin)
+            // Right items: right-aligned (text ends near right margin)
+            // Golden ratio spreads items across their half
+
+            let nominalTextCol: Int
+            if isLeftSide {
+                // Left-aligned: text starts near left margin
+                // Spread range: minCol to centerCol - textWidth - 2
+                let maxStart = max(minCol, centerCol - textWidth - 2)
+                let range = max(1, maxStart - minCol)
+                let spread = Int((Float(index / 2) * goldenRatio)
+                    .truncatingRemainder(dividingBy: Float(range)))
+                nominalTextCol = minCol + spread
+            } else {
+                // Right-aligned: text ends near right margin
+                // Spread range: centerCol + 3 to maxCol - textWidth + 1 (reversed)
+                let minStart = centerCol + 3
+                let maxStart = maxCol - textWidth + 1
+                let range = max(1, maxStart - minStart)
+                let spread = Int((Float(index / 2) * goldenRatio)
+                    .truncatingRemainder(dividingBy: Float(range)))
+                nominalTextCol = maxStart - spread
+            }
+
+            // Vertical bias: left→upward, right→downward
+            let targetRow: Int
+            if isLeftSide {
+                targetRow = centerRow - rowDist
+            } else {
+                targetRow = centerRow + rowDist - blockH
+            }
+
+            // --- Glyph column ---
+            // Skews toward item's side but never reaches full text edge.
+            // At the edge: glyph near the side-edge of text (but not at it)
+            // Near center: glyph near text center
 
             var placed = false
 
-            // Search: try target row, then expand — prefer upward before downward
+            // Search: sweep rows, try small column adjustments (±5) from nominal
             for rowOffset in 0..<areaRows {
                 guard !placed else { break }
 
                 let tryRows: [Int]
                 if rowOffset == 0 {
                     tryRows = [targetRow]
-                } else {
-                    // Try upward first (toward top of page), then downward
+                } else if isLeftSide {
                     tryRows = [targetRow - rowOffset, targetRow + rowOffset]
+                } else {
+                    tryRows = [targetRow + rowOffset, targetRow - rowOffset]
                 }
 
                 for tryRow in tryRows {
                     guard !placed else { break }
                     guard tryRow >= minRow, tryRow + blockH - 1 <= maxRow else { continue }
 
-                    // Sweep columns starting from biased position, alternating left/right
-                    for colOffset in 0...(maxCol - minCol) {
+                    // Try nominal column first, then small adjustments
+                    for colAdj in 0...8 {
                         guard !placed else { break }
-                        let tryCols: [Int]
-                        if colOffset == 0 {
-                            tryCols = [biasedCol]
-                        } else {
-                            tryCols = [biasedCol + colOffset, biasedCol - colOffset]
-                        }
+                        let adjCols: [Int] = colAdj == 0 ? [0] : [colAdj, -colAdj]
 
-                        for rawCol in tryCols {
+                        for adj in adjCols {
                             guard !placed else { break }
-                            // rawCol is the center target; derive text left col
-                            var textCol = rawCol - textWidth / 2
-                            textCol = max(minCol, min(maxCol - textWidth + 1, textCol))
+                            let textCol = max(minCol, min(maxCol - textWidth + 1, nominalTextCol + adj))
 
-                            let glyphC = max(minCol, min(maxCol, textCol + textWidth / 2))
-                            let blockLeft = min(glyphC, textCol)
-                            let blockRight = max(glyphC, textCol + textWidth - 1)
+                            let glyphCol = computeGlyphCol(
+                                textCol: textCol, textWidth: textWidth,
+                                isLeftSide: isLeftSide,
+                                centerCol: centerCol, minCol: minCol, maxCol: maxCol
+                            )
+
+                            let blockLeft = min(glyphCol, textCol)
+                            let blockRight = max(glyphCol, textCol + textWidth - 1)
                             let blockW = blockRight - blockLeft + 1
 
                             guard blockLeft >= minCol, blockRight <= maxCol else { continue }
@@ -234,15 +261,19 @@ struct RadialGraphLayout {
                             grid.setCell(
                                 layer: .content,
                                 row: startRow + tryRow,
-                                col: glyphC,
+                                col: glyphCol,
                                 state: CellState(character: item.glyph, color: .bold, bold: false)
                             )
 
                             for (lineIdx, line) in allTextLines.enumerated() {
                                 let r = tryRow + 1 + lineIdx
                                 guard r <= maxRow else { break }
+                                // Right-side items: right-justify each line within textWidth
+                                let lineStart = isLeftSide
+                                    ? textCol
+                                    : textCol + (textWidth - line.count)
                                 for (charIdx, ch) in line.enumerated() {
-                                    let c = textCol + charIdx
+                                    let c = lineStart + charIdx
                                     guard c <= maxCol else { break }
                                     grid.setCell(
                                         layer: .content,
@@ -265,7 +296,6 @@ struct RadialGraphLayout {
                                 height: blockH
                             ))
                             placed = true
-                            break
                         }
                     }
                 }
@@ -273,5 +303,36 @@ struct RadialGraphLayout {
         }
 
         return placements
+    }
+
+    // MARK: - Glyph Alignment
+
+    /// Glyph skews toward the item's side but never reaches the text edge.
+    /// Left items: glyph shifts left from text center (toward text start)
+    /// Right items: glyph shifts right from text center (toward text end)
+    /// Near center: glyph stays at text center
+    private func computeGlyphCol(
+        textCol: Int, textWidth: Int,
+        isLeftSide: Bool,
+        centerCol: Int, minCol: Int, maxCol: Int
+    ) -> Int {
+        let textCenter = textCol + textWidth / 2
+        let halfSpan = Float(centerCol - minCol)
+        guard halfSpan > 0, textWidth > 2 else { return textCenter }
+
+        // How far from center (0 = at center, 1 = at edge)
+        let edgeFactor = min(1.0, abs(Float(textCenter - centerCol)) / halfSpan)
+
+        // Max shift: never reach the text edge (stop 1 col short)
+        let maxShift = max(1, textWidth / 2 - 1)
+        let shift = Int(round(edgeFactor * 0.7 * Float(maxShift)))
+
+        if isLeftSide {
+            // Shift glyph left (toward text start)
+            return max(textCol + 1, textCenter - shift)
+        } else {
+            // Shift glyph right (toward text end)
+            return min(textCol + textWidth - 2, textCenter + shift)
+        }
     }
 }

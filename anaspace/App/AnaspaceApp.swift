@@ -68,6 +68,11 @@ struct ContentView: View {
                         }
                     }
 
+                    // Transition cover — blocks components from showing through grid kern gaps
+                    if navManager.isTransitioning {
+                        GridColor.background.uiColor.swiftUI
+                    }
+
                     // Grid — transparent background, text layers on top
                     CharacterGridView(controller: controller) { grid in
                         guard !hasPopulated else { return }
@@ -134,7 +139,7 @@ struct ContentView: View {
                        navManager.currentPage == .home,
                        homeRenderer?.hasObservations == true,
                        let metrics = controller.metrics {
-                        let graphStartRow = 11
+                        let graphStartRow = 12
                         let graphEndRow = (controller.grid?.rowCount ?? 40) - 2
                         let centerRow = graphStartRow + (graphEndRow - graphStartRow) / 2 - 1
                         Color.clear
@@ -162,12 +167,12 @@ struct ContentView: View {
                             Color.clear
                                 .contentShape(Rectangle())
                                 .frame(
-                                    width: CGFloat(placement.width) * metrics.cellWidth,
-                                    height: CGFloat(placement.height) * metrics.lineHeight
+                                    width: CGFloat(placement.width + 2) * metrics.cellWidth,
+                                    height: CGFloat(placement.height + 2) * metrics.lineHeight
                                 )
                                 .offset(
-                                    x: GridMetrics.sideMargin + CGFloat(placement.col) * metrics.cellWidth,
-                                    y: GridMetrics.topPadding + CGFloat(placement.row) * metrics.lineHeight
+                                    x: GridMetrics.sideMargin + CGFloat(max(0, placement.col - 1)) * metrics.cellWidth,
+                                    y: GridMetrics.topPadding + CGFloat(max(0, placement.row - 1)) * metrics.lineHeight
                                 )
                                 .onTapGesture {
                                     guard placement.index < home.connections.count else { return }
@@ -309,7 +314,7 @@ struct ContentView: View {
                         HStack {
                             NavButton(
                                 iconName: "arrow-back",
-                                fg: GridColor.background.uiColor.swiftUI,
+                                fg: GridColor.tint.uiColor.swiftUI,
                                 bg: GridColor.bold.uiColor.swiftUI
                             ) {
                                 goBack()
@@ -319,7 +324,7 @@ struct ContentView: View {
                                infoRenderer?.mode == .entity {
                                 NavTextButton(
                                     label: "+ SUBJECT",
-                                    fg: GridColor.background.uiColor.swiftUI,
+                                    fg: GridColor.tint.uiColor.swiftUI,
                                     bg: GridColor.bold.uiColor.swiftUI
                                 ) {
                                     makeEntitySubject()
@@ -884,8 +889,9 @@ struct ContentView: View {
 
         switch index {
         case 0:
-            // WHAT'S HOT / RIGHT HERE
+            // WHAT'S HOT / RIGHT HERE — implies current year
             title = "WHAT'S HOT RIGHT HERE"
+            contextYear = Calendar.current.component(.year, from: Date())
             prompt = """
             The user is at \(locationLabel) on \(currentDate). Who is the most culturally relevant music artist connected to this place right now? Focus on artists who are currently active, trending, or have a deep cultural resonance with this specific location today. The year should be the current year.
             """
