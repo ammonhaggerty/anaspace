@@ -34,6 +34,9 @@ final class ServiceManager {
 
     // Internal state
     private var captureStartTime: Date?
+    private var entityPlaylistName: String?
+    private var savedGeneralQueue: [TrackInfo] = []
+    private var savedGeneralTrack: TrackInfo?
 
     init() {
         queueBuilder = MusicQueueBuilder(music: music)
@@ -381,19 +384,134 @@ final class ServiceManager {
 
         // Build audio player queue from results
         if let result = progress.latestResult {
-            Task {
-                // Ensure MusicKit authorization before searching catalog
-                if !music.isAuthorized {
-                    await permissions.requestAppleMusic()
-                }
-                guard music.isAuthorized else { return }
+            buildPlayerQueue(from: result, shazamResult: progress.shazamResult)
+        }
+    }
 
+    /// Build audio player queue from a ClaudeResult. Called from resolve() and history restore.
+    func buildPlayerQueue(from result: ClaudeResult, shazamResult: ShazamResult? = nil, transition: Bool = false) {
+        entityPlaylistName = nil
+        savedGeneralQueue = []
+        savedGeneralTrack = nil
+        Task {
+            if !music.isAuthorized {
+                await permissions.requestAppleMusic()
+            }
+            guard music.isAuthorized else { return }
+
+            let stream = queueBuilder.buildQueue(
+                from: result,
+                shazamResult: shazamResult,
+                year: result.year
+            )
+            if transition {
+                audioPlayer.transitionToStream(stream, autoplay: appState?.autoplayEnabled ?? false)
+            } else {
+                audioPlayer.loadFromStream(stream, autoplay: appState?.autoplayEnabled ?? false)
+            }
+        }
+    }
+
+    /// Switch to an entity-specific playlist (used when viewing an entity page).
+    /// Uses Claude's recommended song + album context, with fallback to closest-year album.
+    func switchToEntityPlaylist(connection: CultureConnection) {
+        // Save current general playlist position before switching
+        if entityPlaylistName == nil {
+            savedGeneralTrack = audioPlayer.currentTrack
+            savedGeneralQueue = audioPlayer.queue
+        }
+
+        entityPlaylistName = connection.name
+        let year = progress.latestResult?.year ?? Calendar.current.component(.year, from: .now)
+        Task {
+            if !music.isAuthorized {
+                await permissions.requestAppleMusic()
+            }
+            guard music.isAuthorized else { return }
+
+            let stream: AsyncStream<TrackInfo>
+            if connection.entityType == .creation {
+                // Creation entities (songs/albums) — search for the work directly
+                let artist = progress.latestResult?.subject ?? connection.name
+                stream = queueBuilder.buildCreationQueue(
+                    songTitle: connection.name,
+                    artist: artist,
+                    year: year
+                )
+            } else {
+                stream = queueBuilder.buildEntityQueue(connection: connection, year: year)
+            }
+            audioPlayer.transitionToStream(stream, autoplay: true)
+        }
+    }
+
+    /// Switch back to the general subject playlist, resuming where we left off.
+    func switchToGeneralPlaylist() {
+        guard entityPlaylistName != nil else { return }
+        entityPlaylistName = nil
+
+        // Restore saved general playlist position
+        if !savedGeneralQueue.isEmpty || savedGeneralTrack != nil {
+            var restored = savedGeneralQueue
+            // Re-add current track to front so it replays (but queue continues from here)
+            if let track = savedGeneralTrack {
+                restored.insert(track, at: 0)
+            }
+            let stream = AsyncStream<TrackInfo> { continuation in
+                for track in restored { continuation.yield(track) }
+                continuation.finish()
+            }
+            audioPlayer.transitionToStream(stream, autoplay: true)
+            savedGeneralQueue = []
+            savedGeneralTrack = nil
+        } else {
+            // No saved state — rebuild from scratch
+            guard let result = progress.latestResult else { return }
+            Task {
+                guard music.isAuthorized else { return }
                 let stream = queueBuilder.buildQueue(
                     from: result,
                     shazamResult: progress.shazamResult,
                     year: result.year
                 )
-                audioPlayer.loadFromStream(stream, autoplay: appState?.autoplayEnabled ?? false)
+                audioPlayer.transitionToStream(stream, autoplay: true)
+            }
+        }
+    }
+
+    // MARK: - Shortcut Query
+
+    /// Send a shortcut prompt to Claude using only location + date (no audio capture).
+    func queryShortcut(prompt: String) {
+        audioPlayer.beginFadeAndPrepareForCapture()
+        cancelAllTasks()
+        progress.reset()
+        progress.setClaudeProcessing(true)
+
+        claudeTask = Task {
+            // Ensure location is available before transitioning to processing
+            if location.currentResult == nil {
+                try? await location.activate()
+            }
+            progress.setLocation(location.currentResult)
+            progress.transitionTo(.processing)
+
+            do {
+                try await claude.activate()
+                guard claude.isAvailable else {
+                    progress.setClaudeProcessing(false)
+                    resolve()
+                    return
+                }
+                let result = try await claude.processShortcutQuery(prompt: prompt)
+                guard !Task.isCancelled else { return }
+                progress.setLatestResult(result)
+                progress.setClaudeProcessing(false)
+                resolve()
+            } catch {
+                progress.logEvent("Claude error: \(error)")
+                progress.setClaudeProcessing(false)
+                resolve()
             }
         }
     }

@@ -87,7 +87,8 @@ final class ClaudeService: ObservationService {
           "entityType": "collaborator|peer|influence|follower|creation|place|event|movement",
           "relationship": "Brief description of connection to subject",
           "relevance": 0.95,
-          "description": "400-500 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity."
+          "description": "400-500 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity.",
+          "recommendedSong": "Song Title" or null
         }
       ]
     }
@@ -106,6 +107,11 @@ final class ClaudeService: ObservationService {
     in the stated year and place. Not a generic summary of the entity.
     - Subject: Always resolve to the primary artist/band, never a song or album title.
     - birthInfo: Use "B. YEAR, PLACE" for individuals, "EST. YEAR, PLACE" for groups/bands.
+    - recommendedSong: For artist entities (collaborator, peer, influence, follower), pick the one song \
+    that best represents this connection to the subject in the stated year. Prefer: a collaboration between \
+    subject and entity, a song from the entity's album closest to the year, or the entity's most iconic song \
+    from that era. For non-artist entities (creation, place, event, movement), set to null. \
+    Use the standard song title — no "(feat. ...)" suffixes or remaster labels.
     - Subtitles: For creation entities, subtitle is null — the name IS the title. \
     For non-creation entities, subtitle can be a short context note (e.g. venue nickname). \
     Never include album names alongside song names or vice versa. Pick one creation per work. \
@@ -191,6 +197,32 @@ final class ClaudeService: ObservationService {
         print("[Claude] Request: \(userMessage)")
 
         let request = try buildRequest(userMessage: userMessage)
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            print("[Claude] API error \(httpResponse.statusCode): \(body)")
+            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        let text = extractResponseText(from: json)
+        print("[Claude] Response: \(text)")
+        return parseClaudeResponse(text)
+    }
+
+    /// Send a shortcut query with a pre-built prompt directly to Claude.
+    func processShortcutQuery(prompt: String) async throws -> ClaudeResult {
+        print("[Claude] Shortcut request: \(prompt)")
+
+        let request = try buildRequest(userMessage: prompt)
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -472,13 +504,15 @@ final class ClaudeService: ObservationService {
                 .flatMap { EntityType(rawValue: $0) } ?? .peer
             let relevance = item["relevance"] as? Double ?? 0.5
             let description = item["description"] as? String ?? ""
+            let recommendedSong = item["recommendedSong"] as? String
             return CultureConnection(
                 name: name,
                 subtitle: subtitle,
                 entityType: entityType,
                 relationship: relationship,
                 relevance: relevance,
-                description: description
+                description: description,
+                recommendedSong: recommendedSong
             )
         }
     }

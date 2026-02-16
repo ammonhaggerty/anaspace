@@ -8,14 +8,15 @@ final class MusicQueueBuilder {
         self.music = music
     }
 
-    /// Build an ordered queue from a ClaudeResult, yielding tracks as they're found.
+    // MARK: - General Queue (Home/Subject Page)
+
+    /// Build a mixed queue from a ClaudeResult using Claude's recommended songs per connection.
     ///
     /// Priority order:
     /// 1. Initial song (from Shazam appleMusicID if available)
-    /// 2. Subject artist's popular song near the year
-    /// 3. Influences and followers — their popular songs
-    /// 4. Collaborators and peers — songs near the year
-    /// 5. More songs from the subject artist
+    /// 2. Subject artist — album tracks near the year
+    /// 3. Each artist connection — Claude's recommended song (fallback: song near year)
+    /// 4. More from subject artist near the year
     func buildQueue(
         from result: ClaudeResult,
         shazamResult: ShazamResult?,
@@ -25,7 +26,6 @@ final class MusicQueueBuilder {
             Task { @MainActor in
                 var seen = Set<String>()
 
-                // Helper to yield unique tracks
                 func yield(_ track: TrackInfo) {
                     let key = "\(track.artist)|\(track.title)".lowercased()
                     guard !seen.contains(key) else { return }
@@ -39,44 +39,105 @@ final class MusicQueueBuilder {
                     yield(track)
                 }
 
-                // 2. Subject artist's song near the year
+                // 2. Subject artist — songs near the year
                 let subjectTracks = await music.searchSongs(artist: result.subject, near: year, limit: 2)
                 for track in subjectTracks {
                     yield(track)
                 }
 
-                // Categorize connections
-                var influences: [CultureConnection] = []
-                var followers: [CultureConnection] = []
-                var collaborators: [CultureConnection] = []
-                var peers: [CultureConnection] = []
-
-                for conn in result.connections {
-                    switch conn.entityType {
-                    case .influence: influences.append(conn)
-                    case .follower: followers.append(conn)
-                    case .collaborator: collaborators.append(conn)
-                    case .peer: peers.append(conn)
-                    default: break
+                // 3. Each artist connection — use Claude's recommended song
+                let artistConnections = result.connections.filter { $0.entityType.hasArtistCatalog }
+                for conn in artistConnections {
+                    if let songTitle = conn.recommendedSong,
+                       let found = await music.findSongWithAlbum(title: songTitle, artist: conn.name) {
+                        yield(found.song)
+                    } else {
+                        // Fallback: search for a song near the year
+                        let tracks = await music.searchSongs(artist: conn.name, near: year, limit: 1)
+                        for track in tracks { yield(track) }
                     }
                 }
 
-                // 3. Influences and followers — popular songs (any era)
-                for conn in (influences + followers).prefix(4) {
-                    let tracks = await music.searchSongs(artist: conn.name, near: year, limit: 1)
-                    for track in tracks { yield(track) }
-                }
-
-                // 4. Collaborators and peers — songs near the year
-                for conn in (collaborators + peers).prefix(4) {
-                    let tracks = await music.searchSongs(artist: conn.name, near: year, limit: 1)
-                    for track in tracks { yield(track) }
-                }
-
-                // 5. More from subject artist
+                // 4. More from subject artist
                 let moreTracks = await music.searchSongs(artist: result.subject, near: year, limit: 5)
                 for track in moreTracks {
                     yield(track)
+                }
+
+                continuation.finish()
+            }
+        }
+    }
+
+    // MARK: - Entity Queue (Entity Page)
+
+    /// Build a queue for a specific connection entity.
+    ///
+    /// Strategy:
+    /// 1. Play Claude's recommended song first (if found)
+    /// 2. Then play other tracks from the same album
+    /// 3. Fallback: find the album closest to the year, play tracks by popularity
+    func buildEntityQueue(connection: CultureConnection, year: Int) -> AsyncStream<TrackInfo> {
+        AsyncStream { continuation in
+            Task { @MainActor in
+                var seen = Set<String>()
+
+                func yield(_ track: TrackInfo) {
+                    let key = "\(track.artist)|\(track.title)".lowercased()
+                    guard !seen.contains(key) else { return }
+                    seen.insert(key)
+                    continuation.yield(track)
+                }
+
+                // Try Claude's recommended song first
+                if let songTitle = connection.recommendedSong,
+                   let found = await music.findSongWithAlbum(title: songTitle, artist: connection.name) {
+                    // Recommended song plays first
+                    yield(found.song)
+                    // Then other album tracks
+                    for track in found.albumTracks {
+                        yield(track)
+                    }
+                } else {
+                    // Fallback: closest album by year, sorted by popularity
+                    let tracks = await music.getAlbumTracksNearYear(artist: connection.name, year: year)
+                    for track in tracks {
+                        yield(track)
+                    }
+                }
+
+                continuation.finish()
+            }
+        }
+    }
+
+    // MARK: - Creation Queue
+
+    /// Build a queue starting with a specific song (for creation entities).
+    func buildCreationQueue(songTitle: String, artist: String, year: Int) -> AsyncStream<TrackInfo> {
+        AsyncStream { continuation in
+            Task { @MainActor in
+                var seen = Set<String>()
+
+                func yield(_ track: TrackInfo) {
+                    let key = "\(track.artist)|\(track.title)".lowercased()
+                    guard !seen.contains(key) else { return }
+                    seen.insert(key)
+                    continuation.yield(track)
+                }
+
+                // Try to find the specific song and its album
+                if let found = await music.findSongWithAlbum(title: songTitle, artist: artist) {
+                    yield(found.song)
+                    for track in found.albumTracks {
+                        yield(track)
+                    }
+                } else {
+                    // Fallback: search by title as general term
+                    let tracks = await music.searchSongs(artist: "\(artist) \(songTitle)", near: year, limit: 10)
+                    for track in tracks {
+                        yield(track)
+                    }
                 }
 
                 continuation.finish()

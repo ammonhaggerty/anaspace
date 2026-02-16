@@ -26,6 +26,12 @@ struct GridMetrics {
     let cellWidth: CGFloat
     let font: UIFont
     let boldFont: UIFont
+    let smallFont: UIFont
+    let smallBoldFont: UIFont
+    let smallKern: CGFloat
+
+    // Button font ratio from Figma: 12px / 15.52px
+    private static let smallFontRatio: CGFloat = 12.0 / 15.52
 
     init(screenWidth: CGFloat) {
         let availableWidth = screenWidth - 2 * Self.sideMargin
@@ -57,6 +63,18 @@ struct GridMetrics {
             ?? .monospacedSystemFont(ofSize: self.fontSize, weight: .regular)
         self.boldFont = UIFont(name: FontName.bold, size: self.fontSize)
             ?? .monospacedSystemFont(ofSize: self.fontSize, weight: .bold)
+
+        let smallSize = self.fontSize * Self.smallFontRatio
+        self.smallFont = UIFont(name: FontName.regular, size: smallSize)
+            ?? .monospacedSystemFont(ofSize: smallSize, weight: .regular)
+        self.smallBoldFont = UIFont(name: FontName.bold, size: smallSize)
+            ?? .monospacedSystemFont(ofSize: smallSize, weight: .bold)
+
+        // Compute kern for small font so characters align to cell grid
+        let smallCharAdvance = NSAttributedString(
+            string: "A", attributes: [.font: self.smallBoldFont]
+        ).size().width
+        self.smallKern = self.cellWidth - smallCharAdvance
     }
 
     func rowCount(for availableHeight: CGFloat) -> Int {
@@ -105,6 +123,7 @@ struct CellState: Equatable {
     var character: Character
     var color: GridColor
     var bold: Bool
+    var small: Bool = false
 
     static let empty = CellState(character: " ", color: .clear, bold: false)
 }

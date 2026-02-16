@@ -141,6 +141,14 @@ enum EntityType: String, Codable, Sendable {
         case .movement:     return "\u{224B}"  // ≋ triple tilde
         }
     }
+
+    /// Whether this entity type represents a person/artist with a searchable music catalog.
+    var hasArtistCatalog: Bool {
+        switch self {
+        case .collaborator, .peer, .influence, .follower: return true
+        case .creation, .place, .event, .movement: return false
+        }
+    }
 }
 
 // MARK: - Culture Connection
@@ -152,6 +160,7 @@ struct CultureConnection: Codable, Sendable {
     let relationship: String
     let relevance: Double
     let description: String
+    let recommendedSong: String?
 }
 
 // MARK: - Claude Result

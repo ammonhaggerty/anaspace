@@ -16,6 +16,7 @@ final class CaptureRenderer: NSObject {
         case yearChange(Int)
         case locationChange(String, priorSubject: String)
         case subjectChange(String)
+        case shortcut(String)
     }
 
     struct SignalItem {
@@ -153,6 +154,8 @@ final class CaptureRenderer: NSObject {
             items.append(SignalItem(label: "RELATED TO \(priorSubject.uppercased())", value: ""))
         case .subjectChange(let name):
             items.append(SignalItem(label: "EXPLORING \(name.uppercased())", value: ""))
+        case .shortcut(let title):
+            items.append(SignalItem(label: title.uppercased(), value: ""))
         }
 
         // Location (always available)

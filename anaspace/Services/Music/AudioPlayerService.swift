@@ -12,6 +12,8 @@ final class AudioPlayerService {
     private(set) var currentLevel: Float = 0
     private(set) var peakLevel: Float = 0
     private(set) var tickerOffset: Int = 0
+    private(set) var trackDuration: Int = 30
+    private(set) var secondsRemaining: Int = 30
 
     // MARK: - Engine
 
@@ -24,6 +26,8 @@ final class AudioPlayerService {
     private var downloadTask: Task<Void, Never>?
     private var streamTask: Task<Void, Never>?
     private var currentFile: AVAudioFile?
+    private var playbackStartDate: Date?
+    private var pausedElapsed: TimeInterval = 0
 
     // Display update target
     private weak var displayGrid: CharacterGrid?
@@ -35,6 +39,7 @@ final class AudioPlayerService {
         guard state == .paused || (state == .idle && !queue.isEmpty) else { return }
         if state == .paused {
             playerNode?.play()
+            playbackStartDate = Date.now
             state = .playing
             startDisplayUpdates()
         } else {
@@ -43,7 +48,12 @@ final class AudioPlayerService {
     }
 
     func stop() {
-        playerNode?.stop()
+        // Save elapsed time for resume
+        if let start = playbackStartDate {
+            pausedElapsed += Date.now.timeIntervalSince(start)
+        }
+        playbackStartDate = nil
+        playerNode?.pause()
         state = .paused
         currentLevel = 0
         renderPlayerRow()
@@ -71,6 +81,21 @@ final class AudioPlayerService {
 
     func loadFromStream(_ stream: AsyncStream<TrackInfo>, autoplay: Bool) {
         streamTask?.cancel()
+        downloadTask?.cancel()
+
+        // Stop current playback and clear stale queue
+        playerNode?.stop()
+        engine?.mainMixerNode.removeTap(onBus: 0)
+        stopEngine()
+        queue.removeAll()
+        currentTrack = nil
+        currentLevel = 0
+        peakLevel = 0
+        playbackStartDate = nil
+        pausedElapsed = 0
+        state = .idle
+        stopDisplayUpdates()
+
         streamTask = Task {
             var first = true
             for await track in stream {
@@ -84,6 +109,32 @@ final class AudioPlayerService {
                         // Render once to show idle-with-content state (ticker, controls)
                         renderPlayerRow()
                     }
+                }
+            }
+        }
+    }
+
+    /// Transition to a new stream with a 2s fade-out of the current playback.
+    func transitionToStream(_ stream: AsyncStream<TrackInfo>, autoplay: Bool) {
+        guard state == .playing || state == .paused else {
+            loadFromStream(stream, autoplay: autoplay)
+            return
+        }
+
+        state = .fading
+        fadeTimer?.invalidate()
+        var volume = playerNode?.volume ?? 1.0
+
+        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                volume -= 0.05 / 2.0  // ~2s fade
+                if volume <= 0 {
+                    self.fadeTimer?.invalidate()
+                    self.fadeTimer = nil
+                    self.loadFromStream(stream, autoplay: autoplay)
+                } else {
+                    self.playerNode?.volume = volume
                 }
             }
         }
@@ -138,10 +189,12 @@ final class AudioPlayerService {
     func startDisplayUpdates() {
         stopDisplayUpdates()
 
-        // VU meter + render at ~12fps
+        // Countdown + render at ~12fps
         displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.renderPlayerRow()
+                guard let self else { return }
+                self.updateCountdown()
+                self.renderPlayerRow()
             }
         }
 
@@ -194,7 +247,88 @@ final class AudioPlayerService {
             return
         }
 
-        // Cols 0-5: VU meter — 6 ═ bars
+        // Remove structure background when player is active
+        grid.clearRow(layer: .structure, row: row)
+
+        // Cols 0-5: Countdown ":27/30"
+        let countdownText = String(format: ":%02d/%d", secondsRemaining, trackDuration)
+        let isWarning = secondsRemaining <= 5 && state == .playing
+        for (i, ch) in countdownText.enumerated() {
+            guard i < 6 else { break }
+            let isCountdownDigit = i >= 1 && i <= 2
+            let color: GridColor = (isWarning && isCountdownDigit) ? .focus : .bold
+            grid.setCell(
+                layer: .content, row: row, col: i,
+                state: CellState(character: ch, color: color, bold: true, small: true)
+            )
+        }
+
+        // Col 6: spacer
+
+        // Cols 7-25: Ticker tape — 19 chars
+        let tickerWidth = 19
+        let tickerText = buildTickerText()
+        if !tickerText.isEmpty {
+            let chars = Array(tickerText)
+            for i in 0..<tickerWidth {
+                let charIndex = (tickerOffset + i) % chars.count
+                let ch = chars[charIndex]
+                grid.setCell(
+                    layer: .content, row: row, col: 7 + i,
+                    state: CellState(character: ch, color: .bold, bold: true, small: true)
+                )
+            }
+        }
+
+        // Col 26: spacer
+
+        // Cols 27-28: Play/Stop
+        let playStopChar: Character = state == .playing ? "\u{25A0}" : "\u{E0B0}"
+        grid.setCell(
+            layer: .content, row: row, col: 28,
+            state: CellState(character: playStopChar, color: .bold, bold: true, small: true)
+        )
+
+        // Cols 29-30: spacer
+        // Cols 31-32: Skip ▸▸
+        if cols > 31 {
+            grid.setCell(
+                layer: .content, row: row, col: 31,
+                state: CellState(character: "\u{E0B1}", color: .bold, bold: true, small: true)
+            )
+        }
+        if cols > 32 {
+            grid.setCell(
+                layer: .content, row: row, col: 32,
+                state: CellState(character: "\u{E0B1}", color: .bold, bold: true, small: true)
+            )
+        }
+
+        grid.render()
+    }
+
+    // MARK: - Countdown
+
+    private func updateCountdown() {
+        guard state == .playing, let start = playbackStartDate else { return }
+        let elapsed = pausedElapsed + Date.now.timeIntervalSince(start)
+        let exactRemaining = Double(trackDuration) - elapsed
+        secondsRemaining = max(0, Int(exactRemaining))
+
+        // Volume envelope: 1s fade-in, 2s fade-out
+        if elapsed < 1.0 {
+            playerNode?.volume = Float(elapsed)
+        } else if exactRemaining <= 2.0 && exactRemaining > 0 {
+            playerNode?.volume = Float(exactRemaining / 2.0)
+        } else {
+            playerNode?.volume = 1.0
+        }
+    }
+
+    // MARK: - VU Meter (reserved for future audio player)
+
+    /// Render a 6-bar VU meter with peak hold. Not currently used — kept for future full player.
+    func renderVUMeter(into grid: CharacterGrid, row: Int) {
         let activeBars = Int((currentLevel * 6).rounded())
         let peakBar = min(5, Int((peakLevel * 6).rounded()))
 
@@ -221,60 +355,15 @@ final class AudioPlayerService {
             }
         }
 
-        // Col 6: peak hold position
+        // Col 6: peak hold
         if peakLevel > currentLevel && state == .playing {
-            // Already rendered as part of VU if within 0-5
+            // Peak indicator rendered within bars 0-5 above
         } else {
             grid.setCell(
                 layer: .content, row: row, col: 6,
                 state: CellState(character: " ", color: .clear, bold: false)
             )
         }
-
-        // Cols 7-25: Ticker tape — 19 chars
-        let tickerWidth = 19
-        let tickerText = buildTickerText()
-        if !tickerText.isEmpty {
-            let chars = Array(tickerText)
-            for i in 0..<tickerWidth {
-                let charIndex = (tickerOffset + i) % chars.count
-                let ch = chars[charIndex]
-                grid.setCell(
-                    layer: .content, row: row, col: 7 + i,
-                    state: CellState(character: ch, color: .bold, bold: false)
-                )
-            }
-        }
-
-        // Col 26: spacer
-        grid.setCell(
-            layer: .content, row: row, col: 26,
-            state: CellState(character: " ", color: .clear, bold: false)
-        )
-
-        // Cols 27-28: Play/Stop
-        let playStopChar: Character = state == .playing ? "\u{25A0}" : "\u{25B6}"
-        grid.setCell(
-            layer: .content, row: row, col: 28,
-            state: CellState(character: playStopChar, color: .bold, bold: true)
-        )
-
-        // Cols 29-30: spacer
-        // Cols 31-32: Skip ▸▸
-        if cols > 31 {
-            grid.setCell(
-                layer: .content, row: row, col: 31,
-                state: CellState(character: "\u{25B8}", color: .bold, bold: true)
-            )
-        }
-        if cols > 32 {
-            grid.setCell(
-                layer: .content, row: row, col: 32,
-                state: CellState(character: "\u{25B8}", color: .bold, bold: true)
-            )
-        }
-
-        grid.render()
     }
 
     // MARK: - Private
@@ -300,6 +389,8 @@ final class AudioPlayerService {
             currentTrack = nil
             currentLevel = 0
             peakLevel = 0
+            playbackStartDate = nil
+            pausedElapsed = 0
             stopDisplayUpdates()
             renderPlayerRow()
             return
@@ -341,6 +432,12 @@ final class AudioPlayerService {
 
             let file = try AVAudioFile(forReading: fileURL)
             currentFile = file
+
+            // Compute track duration from file
+            let fileDuration = Double(file.length) / file.processingFormat.sampleRate
+            trackDuration = max(1, Int(fileDuration.rounded()))
+            secondsRemaining = trackDuration
+            pausedElapsed = 0
 
             let engine = AVAudioEngine()
             let playerNode = AVAudioPlayerNode()
@@ -391,7 +488,9 @@ final class AudioPlayerService {
                 }
             }
 
+            playerNode.volume = 0
             playerNode.play()
+            playbackStartDate = Date.now
             state = .playing
             startDisplayUpdates()
         } catch {

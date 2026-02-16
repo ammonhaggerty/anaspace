@@ -152,11 +152,17 @@ final class CharacterGrid: UIView {
                 let attributed = NSMutableAttributedString()
                 for col in 0..<cols {
                     let cell = cells[layerIdx][rowStart + col]
-                    let font = cell.bold ? metrics.boldFont : metrics.font
+                    let font: UIFont
+                    if cell.small {
+                        font = cell.bold ? metrics.smallBoldFont : metrics.smallFont
+                    } else {
+                        font = cell.bold ? metrics.boldFont : metrics.font
+                    }
+                    let cellKern = cell.small ? metrics.smallKern : kern
                     let attrs: [NSAttributedString.Key: Any] = [
                         .font: font,
                         .foregroundColor: cell.color.uiColor,
-                        .kern: col < cols - 1 ? kern : 0
+                        .kern: col < cols - 1 ? cellKern : 0
                     ]
                     attributed.append(NSAttributedString(string: String(cell.character), attributes: attrs))
                 }

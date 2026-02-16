@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var onboardingRenderer = OnboardingRenderer()
     @State private var historyStore = HistoryStore()
     @State private var activeHistoryEntryId: UUID?
+    @State private var usedCircaYears: Set<Int> = []
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -202,10 +203,35 @@ struct ContentView: View {
                     }
                 }
                 .overlay(alignment: .topLeading) {
-                    // Play/Stop button overlay for audio player
+                    // Tap overlays for idea cards on Ready to Observe screen
                     if appState.hasCompletedOnboarding,
                        !controller.isCapturing,
                        navManager.currentPage == .home,
+                       homeRenderer?.hasObservations == false,
+                       let home = homeRenderer,
+                       !home.ideaCardRegions.isEmpty,
+                       let metrics = controller.metrics {
+                        ForEach(Array(home.ideaCardRegions.enumerated()), id: \.offset) { index, region in
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .frame(
+                                    width: CGFloat(region.width) * metrics.cellWidth,
+                                    height: CGFloat(region.height) * metrics.lineHeight
+                                )
+                                .offset(
+                                    x: GridMetrics.sideMargin + CGFloat(region.col) * metrics.cellWidth,
+                                    y: GridMetrics.topPadding + CGFloat(region.row) * metrics.lineHeight
+                                )
+                                .onTapGesture {
+                                    handleIdeaCardTap(index: index)
+                                }
+                        }
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    // Play/Stop button overlay for audio player
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
                        serviceManager.audioPlayer.state != .idle || !serviceManager.audioPlayer.queue.isEmpty,
                        let metrics = controller.metrics,
                        let grid = controller.grid {
@@ -226,7 +252,6 @@ struct ContentView: View {
                     // Skip button overlay for audio player
                     if appState.hasCompletedOnboarding,
                        !controller.isCapturing,
-                       navManager.currentPage == .home,
                        serviceManager.audioPlayer.state == .playing,
                        let metrics = controller.metrics,
                        let grid = controller.grid {
@@ -330,7 +355,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: serviceManager.audioPlayer.state) { _, newState in
-            if newState == .playing, navManager.currentPage == .home {
+            if newState == .playing {
                 if let grid = controller.grid {
                     serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
                 }
@@ -442,13 +467,15 @@ struct ContentView: View {
             if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
                 optionsRenderer.autoplayEnabled = appState.autoplayEnabled
             }
+            // Refresh circa year each time home is rendered without observations
+            if navManager.currentPage == .home, homeRenderer?.hasObservations == false {
+                refreshCircaYear()
+            }
             currentRenderer.renderStructure(into: grid)
             currentRenderer.renderContent(into: grid)
-            // Render audio player row on home page
-            if navManager.currentPage == .home {
-                serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
-                serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
-            }
+            // Render audio player row on all pages
+            serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
+            serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
         } else {
             // Content first — computes hiddenStructureRows for buttons
             onboardingRenderer.renderContent(into: grid)
@@ -467,11 +494,9 @@ struct ContentView: View {
         grid.clearLayer(.structure)
         currentRenderer.renderStructure(into: grid)
         currentRenderer.renderContent(into: grid)
-        // Render audio player row on home page
-        if navManager.currentPage == .home {
-            serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
-            serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
-        }
+        // Render audio player row on all pages
+        serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
+        serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
         grid.render()
     }
 
@@ -548,10 +573,21 @@ struct ContentView: View {
     private func navigateToEntityInfo(_ connection: CultureConnection) {
         guard let info = infoRenderer else { return }
         info.configureForEntity(connection)
+
+        // Switch playlist based on entity type
+        if connection.entityType.hasArtistCatalog || connection.entityType == .creation {
+            serviceManager.switchToEntityPlaylist(connection: connection)
+        }
+
         navigateTo(.info)
     }
 
     private func goBack() {
+        // If leaving an entity page with artist playlist, switch back to general
+        if navManager.currentPage == .info, infoRenderer?.mode == .entity {
+            serviceManager.switchToGeneralPlaylist()
+        }
+
         let previousPage = navManager.pageStack.last ?? .home
         guard let targetRenderer = renderers[previousPage] else { return }
         navManager.goBack(using: controller, renderer: targetRenderer)
@@ -584,6 +620,9 @@ struct ContentView: View {
             latitude: entry.latitude,
             longitude: entry.longitude
         )
+
+        // Rebuild audio player queue for the restored subject (fade transition)
+        serviceManager.buildPlayerQueue(from: result, transition: true)
 
         goBack()
     }
@@ -796,5 +835,101 @@ struct ContentView: View {
                 refreshGrid()
             }
         }
+    }
+
+    // MARK: - Idea Card Shortcuts
+
+    private func generateCircaYear() -> Int {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let maxYear = currentYear - 20
+        let minYear = 1920
+
+        // Try up to 50 times to find a non-repeated year
+        for _ in 0..<50 {
+            let year: Int
+            // 60% chance of landing in 1960-1989 (golden era bias)
+            if Double.random(in: 0..<1) < 0.6 {
+                year = Int.random(in: 1960...1989)
+            } else {
+                year = Int.random(in: minYear...maxYear)
+            }
+            if !usedCircaYears.contains(year) {
+                usedCircaYears.insert(year)
+                return year
+            }
+        }
+        // Fallback: just pick any year in range
+        let year = Int.random(in: minYear...maxYear)
+        usedCircaYears.insert(year)
+        return year
+    }
+
+    private func handleIdeaCardTap(index: Int) {
+        guard serviceManager.progress.phase == .idle || serviceManager.progress.phase == .resolved else { return }
+
+        // Build location string from current GPS
+        let locationLabel: String
+        if let loc = serviceManager.location.currentResult {
+            locationLabel = LocationService.displayLabel(for: loc)
+        } else {
+            locationLabel = homeRenderer?.locationLabel ?? "UNKNOWN"
+        }
+
+        let currentDate = Date().formatted(date: .long, time: .omitted)
+        let circaYear = homeRenderer?.circaYear ?? 1975
+
+        let prompt: String
+        let title: String
+        var contextYear: Int? = nil
+
+        switch index {
+        case 0:
+            // WHAT'S HOT / RIGHT HERE
+            title = "WHAT'S HOT RIGHT HERE"
+            prompt = """
+            The user is at \(locationLabel) on \(currentDate). Who is the most culturally relevant music artist connected to this place right now? Focus on artists who are currently active, trending, or have a deep cultural resonance with this specific location today. The year should be the current year.
+            """
+
+        case 1:
+            // WHO SHAPED / THIS PLACE
+            title = "WHO SHAPED THIS PLACE"
+            prompt = """
+            The user is at \(locationLabel). Who is the single most culturally influential music artist or creator whose legacy is inseparable from this place? Focus on the artist who most defined the cultural identity of this location. The year should be their peak era of influence.
+            """
+
+        case 2:
+            // THIS SPOT / CIRCA {YEAR}
+            title = "THIS SPOT CIRCA \(circaYear)"
+            contextYear = circaYear
+            prompt = """
+            The user is at \(locationLabel). The year is \(circaYear). Who was the most culturally significant music artist or creator connected to this place during this era? Focus on the artist who best represents the cultural moment of this location at that time. The year should be \(circaYear).
+            """
+
+        case 3:
+            // WORDS THAT / MADE SONGS
+            title = "WORDS THAT MADE SONGS"
+            prompt = """
+            The user is at \(locationLabel). Find the most significant poet, writer, or literary figure whose words directly influenced or became music connected to this place. Focus on the literary-to-music bridge — someone whose writing was adapted, sampled, or deeply influenced songwriting in this location's musical tradition. The year should reflect their peak period of influence on music.
+            """
+
+        default:
+            return
+        }
+
+        // Enter capture/evaluation flow
+        navManager.resetToHome()
+        serviceManager.queryShortcut(prompt: prompt)
+        controller.enterCapture(
+            mode: .observing,
+            progress: serviceManager.progress,
+            audioService: serviceManager.audio,
+            contextYear: contextYear,
+            queryContext: .shortcut(title),
+            onWipeOutComplete: {}
+        )
+    }
+
+    private func refreshCircaYear() {
+        homeRenderer?.circaYear = generateCircaYear()
     }
 }
