@@ -145,7 +145,7 @@ enum EntityType: String, Codable, Sendable {
 
 // MARK: - Culture Connection
 
-struct CultureConnection: Sendable {
+struct CultureConnection: Codable, Sendable {
     let name: String
     let subtitle: String?
     let entityType: EntityType
@@ -156,7 +156,7 @@ struct CultureConnection: Sendable {
 
 // MARK: - Claude Result
 
-struct ClaudeResult: Sendable {
+struct ClaudeResult: Codable, Sendable {
     let subject: String
     let subjectType: String
     let birthInfo: String

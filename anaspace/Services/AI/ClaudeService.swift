@@ -110,6 +110,10 @@ final class ClaudeService: ObservationService {
     For non-creation entities, subtitle can be a short context note (e.g. venue nickname). \
     Never include album names alongside song names or vice versa. Pick one creation per work. \
     No format descriptors (no "Double Album", "LP", "Single", "Debut", etc.).
+    - CRITICAL: You must ALWAYS return the JSON object. Never return commentary, apologies, \
+    explanations, or questions. If you lack specific knowledge about a place or era, broaden \
+    your search (city → region → country) until you find a relevant artist. There is always \
+    a culturally relevant musician for any location and year — find one.
     """
 
     // MARK: - ObservationService Conformance
@@ -134,6 +138,8 @@ final class ClaudeService: ObservationService {
         \(location) in \(year). This could be a direct collaborator, a successor carrying their \
         influence, or an artist who embodies a similar cultural role in that era and place. \
         The subject should NOT be \(subject) themselves unless they were genuinely active there in \(year). \
+        You MUST return the JSON object. Never return commentary, apologies, or explanations. \
+        There is always a relevant artist — broaden your search until you find one. \
         Build the culture map around this new subject, anchored to \(year) and \(location).
         """
         print("[Claude] Request: \(userMessage)")
@@ -176,6 +182,10 @@ final class ClaudeService: ObservationService {
         Only keep \(subject) as the subject if they have a genuine, specific connection to \(location) \
         in \(year) (e.g., they lived there, recorded there, performed a landmark show there). \
         A generic "their music was popular worldwide" is NOT a sufficient connection. \
+        Search broadly: neighborhood → city → region → country. If no exact city match exists, \
+        find the best artist from the surrounding region or country for that era. \
+        You MUST return the JSON object. Never return commentary, apologies, or explanations. \
+        There is always a relevant artist — broaden your search until you find one. \
         Build the culture map around this subject, anchored to \(year) and \(location).
         """
         print("[Claude] Request: \(userMessage)")
@@ -367,11 +377,21 @@ final class ClaudeService: ObservationService {
 
     /// Extract the assistant's text from the Messages API response.
     private func extractResponseText(from json: [String: Any]) -> String {
-        guard let content = json["content"] as? [[String: Any]] else { return "" }
-        return content.compactMap { block in
+        guard let content = json["content"] as? [[String: Any]] else {
+            print("[Claude] EXTRACT FAIL: no 'content' array in response. Keys: \(json.keys.sorted())")
+            if let errorMsg = json["error"] as? [String: Any] {
+                print("[Claude] API error object: \(errorMsg)")
+            }
+            return ""
+        }
+        let text = content.compactMap { block -> String? in
             guard block["type"] as? String == "text" else { return nil }
             return block["text"] as? String
         }.joined()
+        if text.isEmpty {
+            print("[Claude] EXTRACT WARN: content blocks present but no text extracted. Blocks: \(content.count)")
+        }
+        return text
     }
 
     // MARK: - Response Parsing
@@ -393,9 +413,19 @@ final class ClaudeService: ObservationService {
     private func parseClaudeResponse(_ text: String) -> ClaudeResult {
         let cleaned = stripCodeFences(text)
 
-        if let data = cleaned.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            return ClaudeResult(
+        guard let data = cleaned.data(using: .utf8) else {
+            print("[Claude] PARSE FAIL: could not convert to UTF-8 data")
+            print("[Claude] Raw text (\(text.count) chars): \(text.prefix(500))")
+            return fallbackResult(text)
+        }
+
+        do {
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("[Claude] PARSE FAIL: JSON is not a dictionary")
+                print("[Claude] Raw text (\(text.count) chars): \(text.prefix(500))")
+                return fallbackResult(text)
+            }
+            let result = ClaudeResult(
                 subject: json["subject"] as? String ?? "Unknown",
                 subjectType: json["subjectType"] as? String ?? "unknown",
                 birthInfo: json["birthInfo"] as? String ?? "",
@@ -406,10 +436,17 @@ final class ClaudeService: ObservationService {
                 connections: parseEntities(json["entities"]),
                 isStreaming: false
             )
+            print("[Claude] Parsed OK: subject=\(result.subject), place=\(result.place), year=\(result.year), entities=\(result.connections.count)")
+            return result
+        } catch {
+            print("[Claude] PARSE FAIL: \(error)")
+            print("[Claude] Cleaned text (\(cleaned.count) chars): \(cleaned.prefix(500))")
+            return fallbackResult(text)
         }
+    }
 
-        // Fallback: treat the entire text as narrative
-        return ClaudeResult(
+    private func fallbackResult(_ text: String) -> ClaudeResult {
+        ClaudeResult(
             subject: "Observation",
             subjectType: "unknown",
             birthInfo: "",

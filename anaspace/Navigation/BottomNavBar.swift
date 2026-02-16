@@ -91,6 +91,7 @@ struct NavTextButton: View {
     var body: some View {
         Text(label)
             .font(.system(size: 13, weight: .bold, design: .monospaced))
+            .tracking(2)
             .foregroundStyle(fg)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)

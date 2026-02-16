@@ -5,6 +5,13 @@ final class HistoryPageRenderer: PageRenderer {
     let page: Page = .history
     let hiddenStructureRows: Set<Int> = []
 
+    var entries: [HistoryEntry] = []
+
+    /// Row index of each entry, populated during renderContent for tap overlays.
+    private(set) var entryRows: [Int] = []
+
+    private let layout = FormalContentLayout()
+
     func renderStructure(into grid: CharacterGrid) {
         let cols = GridMetrics.columns
         for row in 0..<grid.rowCount {
@@ -18,16 +25,43 @@ final class HistoryPageRenderer: PageRenderer {
     }
 
     func renderContent(into grid: CharacterGrid) {
-        let text = "HISTORY"
-        let cols = GridMetrics.columns
-        let centerRow = grid.rowCount / 2
-        let startCol = max(0, (cols - text.count) / 2)
+        entryRows = []
+        var row = 0
 
-        for (i, ch) in text.enumerated() {
+        // Row 0: spacer
+        row += 1
+
+        // Row 1: header
+        let header = "\u{21A9} HISTORY"
+        for (i, ch) in header.enumerated() {
+            guard i < 31 else { break }
             grid.setCell(
-                layer: .content, row: centerRow, col: startCol + i,
+                layer: .content, row: row, col: 1 + i,
                 state: CellState(character: ch, color: .bold, bold: true)
             )
+        }
+        row += 1
+
+        // Row 2: spacer
+        row += 1
+
+        // Entry rows: each entry = 1 text row + 1 spacer
+        for entry in entries {
+            guard row < grid.rowCount else { break }
+
+            entryRows.append(row)
+            let line = entry.displayLine
+            for (i, ch) in line.enumerated() {
+                guard 1 + i < GridMetrics.columns else { break }
+                grid.setCell(
+                    layer: .content, row: row, col: 1 + i,
+                    state: CellState(character: ch, color: .bold, bold: false)
+                )
+            }
+            row += 1
+
+            // Spacer after entry
+            row += 1
         }
     }
 }

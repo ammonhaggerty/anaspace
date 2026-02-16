@@ -14,7 +14,7 @@ final class CaptureRenderer: NSObject {
     enum QueryContext {
         case observation
         case yearChange(Int)
-        case locationChange(String)
+        case locationChange(String, priorSubject: String)
         case subjectChange(String)
     }
 
@@ -148,8 +148,9 @@ final class CaptureRenderer: NSObject {
             break
         case .yearChange(let year):
             items.append(SignalItem(label: "FINDING RELATED FROM \(year)", value: ""))
-        case .locationChange(let location):
-            items.append(SignalItem(label: "FINDING RELATED IN \(location.uppercased())", value: ""))
+        case .locationChange(_, let priorSubject):
+            items.append(SignalItem(label: "EXPLORING A NEW LOCATION", value: ""))
+            items.append(SignalItem(label: "RELATED TO \(priorSubject.uppercased())", value: ""))
         case .subjectChange(let name):
             items.append(SignalItem(label: "EXPLORING \(name.uppercased())", value: ""))
         }

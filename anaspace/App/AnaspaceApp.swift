@@ -24,6 +24,8 @@ struct ContentView: View {
     @State private var selectedCoordinate = CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712)
     @State private var serviceManager = ServiceManager()
     @State private var onboardingRenderer = OnboardingRenderer()
+    @State private var historyStore = HistoryStore()
+    @State private var activeHistoryEntryId: UUID?
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -43,6 +45,10 @@ struct ContentView: View {
 
     private var infoRenderer: InfoPageRenderer? {
         renderers[.info] as? InfoPageRenderer
+    }
+
+    private var historyRenderer: HistoryPageRenderer? {
+        renderers[.history] as? HistoryPageRenderer
     }
 
     var body: some View {
@@ -169,6 +175,32 @@ struct ContentView: View {
                         }
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    // Tap overlays for history entries
+                    if appState.hasCompletedOnboarding,
+                       !controller.isCapturing,
+                       navManager.currentPage == .history,
+                       let history = historyRenderer,
+                       let metrics = controller.metrics {
+                        ForEach(Array(history.entryRows.enumerated()), id: \.offset) { index, row in
+                            if index < history.entries.count {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .frame(
+                                        width: CGFloat(GridMetrics.columns) * metrics.cellWidth,
+                                        height: metrics.lineHeight
+                                    )
+                                    .offset(
+                                        x: GridMetrics.sideMargin,
+                                        y: GridMetrics.topPadding + CGFloat(row) * metrics.lineHeight
+                                    )
+                                    .onTapGesture {
+                                        restoreFromHistory(history.entries[index])
+                                    }
+                            }
+                        }
+                    }
+                }
 
                 Group {
                     if !appState.hasCompletedOnboarding {
@@ -178,6 +210,7 @@ struct ContentView: View {
                             isObserving: controller.isObserving,
                             onObserveTap: {
                                 guard serviceManager.progress.phase == .idle else { return }
+                                activeHistoryEntryId = nil
                                 Task { await serviceManager.beginCapture() }
                                 controller.enterCapture(
                                     mode: .observing,
@@ -188,6 +221,7 @@ struct ContentView: View {
                                 )
                             },
                             onHistoryTap: {
+                                historyRenderer?.entries = historyStore.entries
                                 navigateTo(.history)
                             },
                             onOptionsTap: {
@@ -235,6 +269,7 @@ struct ContentView: View {
         }
         .statusBarHidden()
         .task {
+            historyStore.load()
             await serviceManager.refreshPermissions()
             onboardingRenderer.permissions = serviceManager.permissions
         }
@@ -256,7 +291,7 @@ struct ContentView: View {
         }
         .onChange(of: serviceManager.progress.phase) { _, newPhase in
             if newPhase == .resolved {
-                handleResultUpdate()
+                handleResultUpdate(saveToHistory: true)
                 controller.exitCapture { grid in
                     populateGrid(grid)
                 }
@@ -363,7 +398,7 @@ struct ContentView: View {
         grid.render()
     }
 
-    private func handleResultUpdate() {
+    private func handleResultUpdate(saveToHistory: Bool = false) {
         guard let result = serviceManager.progress.latestResult else { return }
         guard let home = homeRenderer else { return }
 
@@ -391,6 +426,25 @@ struct ContentView: View {
         if let loc = serviceManager.progress.location {
             selectedCoordinate = loc.coordinate
             homeRenderer?.locationLabel = LocationService.displayLabel(for: loc)
+        }
+
+        // Save to history only on final resolution (not streaming updates)
+        if saveToHistory {
+            if let activeId = activeHistoryEntryId {
+                historyStore.promote(activeId)
+                activeHistoryEntryId = nil
+            }
+
+            let locationLabel = home.locationLabel
+            let entry = HistoryEntry(
+                id: UUID(),
+                result: result,
+                locationLabel: locationLabel,
+                latitude: selectedCoordinate.latitude,
+                longitude: selectedCoordinate.longitude,
+                timestamp: .now
+            )
+            historyStore.add(entry)
         }
 
         // Only refresh grid if not in capture mode — exitCapture will handle it
@@ -424,6 +478,37 @@ struct ContentView: View {
         let previousPage = navManager.pageStack.last ?? .home
         guard let targetRenderer = renderers[previousPage] else { return }
         navManager.goBack(using: controller, renderer: targetRenderer)
+    }
+
+    private func restoreFromHistory(_ entry: HistoryEntry) {
+        guard let home = homeRenderer else { return }
+
+        activeHistoryEntryId = entry.id
+
+        // Restore home page state from history entry
+        let result = entry.result
+        home.hasObservations = true
+        home.graphSubject = GraphSubject(label: result.subject.uppercased())
+        home.connections = result.connections
+        home.graphItems = result.connections.map { conn in
+            GraphItem(
+                glyph: conn.entityType.glyph,
+                label: conn.name,
+                subtitle: conn.subtitle,
+                relevance: Float(conn.relevance)
+            )
+        }
+        home.bio = result.bio
+        home.birthInfo = result.birthInfo
+        home.locationLabel = entry.locationLabel
+
+        selectedYear = result.year
+        selectedCoordinate = CLLocationCoordinate2D(
+            latitude: entry.latitude,
+            longitude: entry.longitude
+        )
+
+        goBack()
     }
 
     private func makeEntitySubject() {
@@ -466,7 +551,7 @@ struct ContentView: View {
         )
     }
 
-    private func queryWithLocationChange(newLocation: String) {
+    private func queryWithLocationChange(newLocation: String, locationResult: LocationResult? = nil) {
         guard let home = homeRenderer, home.hasObservations else { return }
         let subject = home.graphSubject.label
 
@@ -474,14 +559,15 @@ struct ContentView: View {
         serviceManager.queryLocationChange(
             subject: subject,
             year: selectedYear,
-            location: newLocation
+            location: newLocation,
+            locationResult: locationResult
         )
         controller.enterCapture(
             mode: .observing,
             progress: serviceManager.progress,
             audioService: serviceManager.audio,
             contextYear: selectedYear,
-            queryContext: .locationChange(newLocation),
+            queryContext: .locationChange(newLocation, priorSubject: subject),
             onWipeOutComplete: {}
         )
     }
@@ -628,7 +714,7 @@ struct ContentView: View {
             homeRenderer?.locationLabel = newLabel
 
             if homeRenderer?.hasObservations == true {
-                queryWithLocationChange(newLocation: newLabel)
+                queryWithLocationChange(newLocation: newLabel, locationResult: result)
             } else {
                 refreshGrid()
             }

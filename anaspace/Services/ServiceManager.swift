@@ -440,11 +440,11 @@ final class ServiceManager {
     }
 
     /// Query Claude with a location change — subject and year are fixed, location is new.
-    func queryLocationChange(subject: String, year: Int, location: String) {
+    func queryLocationChange(subject: String, year: Int, location: String, locationResult: LocationResult? = nil) {
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
-        progress.setLocation(self.location.currentResult)
+        progress.setLocation(locationResult ?? self.location.currentResult)
         progress.setClaudeProcessing(true)
 
         claudeTask = Task {

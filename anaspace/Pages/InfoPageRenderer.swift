@@ -59,12 +59,11 @@ final class InfoPageRenderer: PageRenderer {
     }
 
     private func renderEntity(into grid: CharacterGrid) {
-        let typeLine = "\(entityType.glyph) \(entityType.rawValue.uppercased())"
+        let titleWithGlyph = "\(entityType.glyph) \(entityName)"
         let sections: [ContentSection] = [
             .spacer,
-            .header(entityName),
+            .header(titleWithGlyph),
             .spacer,
-            .paragraph(typeLine),
             .paragraph(relationship),
             .spacer,
             .paragraph(entityDescription),
