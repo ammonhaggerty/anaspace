@@ -2,7 +2,7 @@
 
 **A cultural exploration engine for iOS, built entirely with Claude Code.**
 
-https://github.com/user-attachments/assets/c2db8a6a-06fd-4598-a379-c638083584d9
+https://github.com/user-attachments/assets/9273d71d-6e02-425c-a75b-15a5304f4094
 
 > Press a button. The app listens to your world — identifies the song, hears your voice, knows where you are — and maps the cultural web connecting it all. Music, place, and time become coordinates in a living knowledge graph.
 
