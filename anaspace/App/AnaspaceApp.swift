@@ -405,7 +405,6 @@ struct ContentView: View {
             }
             .ignoresSafeArea()
         }
-        .statusBarHidden()
         .task {
             historyStore.load()
             serviceManager.appState = appState
