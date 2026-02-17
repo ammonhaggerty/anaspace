@@ -144,17 +144,17 @@ struct RadialGraphLayout {
         }
 
         // --- Bracket decoration around subject ---
-        let bracketLeft = max(minCol, subLabelStart - 1)
-        let bracketRight = min(maxCol, subLabelStart + subjectText.count)
+        let bracketLeft = max(minCol, subLabelStart - 2)
+        let bracketRight = min(maxCol, subLabelStart + subjectText.count + 1)
 
         // Top bracket corners (same row as glyph)
         grid.setCell(
             layer: .content, row: startRow + centerRow, col: bracketLeft,
-            state: CellState(character: "\u{23A1}", color: .bold, bold: false)  // ⎡
+            state: CellState(character: "\u{250C}", color: .bold, bold: false)  // ┌
         )
         grid.setCell(
             layer: .content, row: startRow + centerRow, col: bracketRight,
-            state: CellState(character: "\u{23A4}", color: .bold, bold: false)  // ⎤
+            state: CellState(character: "\u{2510}", color: .bold, bold: false)  // ┐
         )
         occupancy.mark(row: centerRow, col: bracketLeft, width: 1, height: 1)
         occupancy.mark(row: centerRow, col: bracketRight, width: 1, height: 1)
@@ -176,11 +176,11 @@ struct RadialGraphLayout {
         if bottomBracketRow <= maxRow {
             grid.setCell(
                 layer: .content, row: startRow + bottomBracketRow, col: bracketLeft,
-                state: CellState(character: "\u{23A3}", color: .bold, bold: false)  // ⎣
+                state: CellState(character: "\u{2514}", color: .bold, bold: false)  // └
             )
             grid.setCell(
                 layer: .content, row: startRow + bottomBracketRow, col: bracketRight,
-                state: CellState(character: "\u{23A6}", color: .bold, bold: false)  // ⎦
+                state: CellState(character: "\u{2518}", color: .bold, bold: false)  // ┘
             )
             occupancy.mark(row: bottomBracketRow, col: bracketLeft, width: 1, height: 1)
             occupancy.mark(row: bottomBracketRow, col: bracketRight, width: 1, height: 1)

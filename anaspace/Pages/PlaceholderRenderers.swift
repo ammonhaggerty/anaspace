@@ -91,11 +91,11 @@ final class HistoryPageRenderer: PageRenderer {
         // Row 1: top bracket corners
         grid.setCell(
             layer: .content, row: startRow, col: bracketLeft,
-            state: CellState(character: "\u{23A1}", color: .bold, bold: false)  // ⎡
+            state: CellState(character: "\u{250C}", color: .bold, bold: false)  // ┌
         )
         grid.setCell(
             layer: .content, row: startRow, col: bracketRight,
-            state: CellState(character: "\u{23A4}", color: .bold, bold: false)  // ⎤
+            state: CellState(character: "\u{2510}", color: .bold, bold: false)  // ┐
         )
 
         // Row 2: bracket extensions + text centered
@@ -122,11 +122,11 @@ final class HistoryPageRenderer: PageRenderer {
         // Row 3: bottom bracket corners
         grid.setCell(
             layer: .content, row: startRow + 2, col: bracketLeft,
-            state: CellState(character: "\u{23A3}", color: .bold, bold: false)  // ⎣
+            state: CellState(character: "\u{2514}", color: .bold, bold: false)  // └
         )
         grid.setCell(
             layer: .content, row: startRow + 2, col: bracketRight,
-            state: CellState(character: "\u{23A6}", color: .bold, bold: false)  // ⎦
+            state: CellState(character: "\u{2518}", color: .bold, bold: false)  // ┘
         )
 
         return startRow + 3
