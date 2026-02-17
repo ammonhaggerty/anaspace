@@ -9,6 +9,7 @@ final class GridController {
     let cascade = CascadeAnimation()
     let observe = ObserveAnimation()
     let wipe = WipeAnimation()
+    let idlePulse = IdlePulseAnimation()
     let captureRenderer = CaptureRenderer()
 
     // Queued restore closure for edge case: exitCapture called during wipe
@@ -20,6 +21,18 @@ final class GridController {
     func triggerCascade() {
         guard let grid else { return }
         cascade.run(on: grid) {}
+    }
+
+    // MARK: - Idle Pulse
+
+    func startIdlePulse() {
+        guard let grid, !idlePulse.isRunning else { return }
+        idlePulse.run(on: grid) {}
+    }
+
+    func stopIdlePulse() {
+        guard idlePulse.isRunning else { return }
+        idlePulse.cancel()
     }
 
     // MARK: - Capture Flow
@@ -36,6 +49,7 @@ final class GridController {
         isCapturing = true
         isObserving = true
         pendingHoldUpgrade = false
+        idlePulse.cancel()
 
         wipe.wipeOut(on: grid) { [weak self] in
             guard let self, let grid = self.grid else { return }

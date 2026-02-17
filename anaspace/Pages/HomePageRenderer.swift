@@ -74,21 +74,22 @@ final class HomePageRenderer: PageRenderer {
     private func renderReadyState(into grid: CharacterGrid) {
         let cols = GridMetrics.columns
 
-        // "READY TO OBSERVE" — positioned at 1/3 down, shifted up 4
+        // Circle glyph — centered, one row above the text (pulsed by IdlePulseAnimation)
         let readyRow = grid.rowCount / 3 - 4
-        let readyText = "\u{25CF}  READY TO OBSERVE"
-        let readyCol = max(0, (cols - readyText.count) / 2)
+        let circleCol = cols / 2
+        grid.setCell(
+            layer: .content, row: readyRow - 1, col: circleCol,
+            state: CellState(character: "\u{25CF}", color: .focus, bold: false)
+        )
 
+        // "READY TO OBSERVE" — centered
+        let readyText = "READY TO OBSERVE"
+        let readyCol = max(0, (cols - readyText.count) / 2)
         for (i, ch) in readyText.enumerated() {
             guard readyCol + i < cols else { break }
-            let isGlyph = i == 0
             grid.setCell(
                 layer: .content, row: readyRow, col: readyCol + i,
-                state: CellState(
-                    character: ch,
-                    color: isGlyph ? .focus : .bold,
-                    bold: false
-                )
+                state: CellState(character: ch, color: .bold, bold: false)
             )
         }
 

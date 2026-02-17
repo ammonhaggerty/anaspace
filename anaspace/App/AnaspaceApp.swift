@@ -535,10 +535,17 @@ struct ContentView: View {
             onboardingRenderer.renderStructure(into: grid)
         }
         grid.render()
+
+        if appState.hasCompletedOnboarding,
+           navManager.currentPage == .home,
+           homeRenderer?.hasObservations == false {
+            controller.startIdlePulse()
+        }
     }
 
     private func refreshGrid() {
         guard let grid = controller.grid else { return }
+        controller.stopIdlePulse()
         // Sync autoplay state for options page
         if let optionsRenderer = renderers[.options] as? OptionsPageRenderer {
             optionsRenderer.autoplayEnabled = appState.autoplayEnabled
@@ -551,11 +558,16 @@ struct ContentView: View {
         serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
         serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
         grid.render()
+
+        if navManager.currentPage == .home, homeRenderer?.hasObservations == false {
+            controller.startIdlePulse()
+        }
     }
 
     private func handleResultUpdate(saveToHistory: Bool = false) {
         guard let result = serviceManager.progress.latestResult else { return }
         guard let home = homeRenderer else { return }
+        controller.stopIdlePulse()
 
         home.hasObservations = true
         home.graphSubject = GraphSubject(label: result.subject.uppercased())
@@ -610,6 +622,7 @@ struct ContentView: View {
 
     private func navigateTo(_ page: Page) {
         guard let targetRenderer = renderers[page] else { return }
+        controller.stopIdlePulse()
         navManager.navigate(to: page, using: controller, renderer: targetRenderer)
     }
 
