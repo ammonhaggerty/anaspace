@@ -89,8 +89,9 @@ final class IdlePulseAnimation: NSObject, GridAnimation {
             colScale = cellWidth / cellHeight
         }
 
+        // Origin at the pulsing circle position: one row above "READY TO OBSERVE"
         let centerCol: Float = Float(cols) / 2.0
-        let centerRow: Float = Float(rows) / 2.0
+        let centerRow: Float = Float(rows / 3 - 4 - 1)
 
         distances = [Float](repeating: 0, count: totalCells)
         maxDistance = 0

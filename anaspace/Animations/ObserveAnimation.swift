@@ -5,9 +5,9 @@ import UIKit
 extension ObserveAnimation {
 
     struct Config {
-        var outboundSpeed: Float = 17.5        // distance units per second
+        var outboundSpeed: Float = 8.75         // distance units per second
         var outboundBandWidth: Float = 9.0     // distance units
-        var outboundPulseInterval: Float = 1.0 // seconds between pulses
+        var outboundPulseInterval: Float = 2.0 // seconds between pulses
         var inboundSpeed: Float = 35.0         // distance units per second
         var inboundBandWidth: Float = 5.0      // distance units
         var chaos: Float = 0.08                 // glyph re-randomization rate (low = persistent)
@@ -17,6 +17,7 @@ extension ObserveAnimation {
         var isIndefinite: Bool = false          // loop forever (no auto-stop)
         var skipRows: Set<Int> = []            // rows to leave clear (e.g., header)
         var isEvaluating: Bool = false         // contracting circles mode
+        var inboundEnabled: Bool = false       // spawn inbound waves
     }
 }
 
@@ -217,14 +218,16 @@ final class ObserveAnimation: NSObject, GridAnimation {
             let amplitude = sampleAmplitude(at: elapsed)
 
             // --- Spawn / prune inbound waves ---
-            let spawnInterval = inboundSpawnInterval(for: amplitude)
-            if elapsed >= nextInboundSpawn {
-                inboundWaves.append(InboundWave(spawnTime: elapsed, amplitude: amplitude))
-                nextInboundSpawn = elapsed + spawnInterval
-            }
-            inboundWaves.removeAll { wave in
-                let wavefront = maxDistance - (elapsed - wave.spawnTime) * config.inboundSpeed
-                return wavefront < -config.inboundBandWidth / 2.0
+            if config.inboundEnabled {
+                let spawnInterval = inboundSpawnInterval(for: amplitude)
+                if elapsed >= nextInboundSpawn {
+                    inboundWaves.append(InboundWave(spawnTime: elapsed, amplitude: amplitude))
+                    nextInboundSpawn = elapsed + spawnInterval
+                }
+                inboundWaves.removeAll { wave in
+                    let wavefront = maxDistance - (elapsed - wave.spawnTime) * config.inboundSpeed
+                    return wavefront < -config.inboundBandWidth / 2.0
+                }
             }
         }
 

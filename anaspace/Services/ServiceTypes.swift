@@ -203,7 +203,7 @@ struct ServiceConfiguration: Sendable {
         locationCascadeMaxLevel: Int = 4,
         voiceOverridesShazam: Bool = true,
         lyricIdEnabled: Bool = true,
-        shazamTimeoutSeconds: TimeInterval = 10
+        shazamTimeoutSeconds: TimeInterval = 12
     ) {
         self.holdThresholdMs = holdThresholdMs
         self.hardTimeoutSeconds = hardTimeoutSeconds
