@@ -37,6 +37,7 @@ final class ServiceManager {
     private var entityPlaylistName: String?
     private var savedGeneralQueue: [TrackInfo] = []
     private var savedGeneralTrack: TrackInfo?
+    private var isContextChangeQuery = false
 
     init() {
         queueBuilder = MusicQueueBuilder(music: music)
@@ -384,8 +385,9 @@ final class ServiceManager {
 
         // Build audio player queue from results
         if let result = progress.latestResult {
-            buildPlayerQueue(from: result, shazamResult: progress.shazamResult)
+            buildPlayerQueue(from: result, shazamResult: progress.shazamResult, transition: isContextChangeQuery)
         }
+        isContextChangeQuery = false
     }
 
     /// Build audio player queue from a ClaudeResult. Called from resolve() and history restore.
@@ -521,7 +523,7 @@ final class ServiceManager {
 
     /// Send a direct text query to Claude (e.g. from + SUBJECT button) without audio capture.
     func querySubjectChange(newSubject: String, priorSubject: String, location: String) {
-        audioPlayer.beginFadeAndPrepareForCapture()
+        isContextChangeQuery = true
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
@@ -553,7 +555,7 @@ final class ServiceManager {
 
     /// Query Claude with a year change — year and location are fixed, subject is flexible.
     func queryYearChange(subject: String, year: Int, location: String) {
-        audioPlayer.beginFadeAndPrepareForCapture()
+        isContextChangeQuery = true
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
@@ -585,7 +587,7 @@ final class ServiceManager {
 
     /// Query Claude with a location change — subject and year are fixed, location is new.
     func queryLocationChange(subject: String, year: Int, location: String, locationResult: LocationResult? = nil) {
-        audioPlayer.beginFadeAndPrepareForCapture()
+        isContextChangeQuery = true
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
@@ -613,6 +615,29 @@ final class ServiceManager {
                 resolve()
             }
         }
+    }
+
+    // MARK: - Context Change Cancel
+
+    /// Cancel an in-flight context change (year/location/subject) and reset progress.
+    func cancelContextChange() {
+        cancelAllTasks()
+        deactivateAll()
+        progress.reset()
+    }
+
+    /// Restore the audio player queue from a saved snapshot.
+    func restorePlayerState(queue: [TrackInfo], currentTrack: TrackInfo?) {
+        var restored = queue
+        if let track = currentTrack {
+            restored.insert(track, at: 0)
+        }
+        guard !restored.isEmpty else { return }
+        let stream = AsyncStream<TrackInfo> { continuation in
+            for track in restored { continuation.yield(track) }
+            continuation.finish()
+        }
+        audioPlayer.transitionToStream(stream, autoplay: appState?.autoplayEnabled ?? false)
     }
 
     // MARK: - Helpers

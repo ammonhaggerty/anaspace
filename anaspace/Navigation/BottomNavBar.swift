@@ -1,5 +1,15 @@
 import SwiftUI
 
+// MARK: - Footer State
+
+enum FooterState {
+    case hidden
+    case homeIdle
+    case homeObserving
+    case contextChange
+    case subpage
+}
+
 // MARK: - Bottom Nav Bar
 
 struct BottomNavBar: View {

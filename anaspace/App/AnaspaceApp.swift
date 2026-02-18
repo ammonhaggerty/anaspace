@@ -1,6 +1,19 @@
 import SwiftUI
 import CoreLocation
 
+struct ContextChangeSnapshot {
+    let hasObservations: Bool
+    let graphSubject: GraphSubject
+    let graphItems: [GraphItem]
+    let connections: [CultureConnection]
+    let bio: String
+    let birthInfo: String
+    let locationLabel: String
+    let selectedYear: Int
+    let selectedCoordinate: CLLocationCoordinate2D
+    let activeHistoryEntryId: UUID?
+}
+
 @main
 struct AnaspaceApp: App {
     var body: some Scene {
@@ -28,6 +41,7 @@ struct ContentView: View {
     @State private var historyStore = HistoryStore()
     @State private var activeHistoryEntryId: UUID?
     @State private var usedCircaYears: Set<Int> = []
+    @State private var contextChangeSnapshot: ContextChangeSnapshot?
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -51,6 +65,17 @@ struct ContentView: View {
 
     private var historyRenderer: HistoryPageRenderer? {
         renderers[.history] as? HistoryPageRenderer
+    }
+
+    private var footerState: FooterState {
+        guard appState.hasCompletedOnboarding else { return .hidden }
+        guard navManager.currentPage == .home else { return .subpage }
+        if controller.isCapturing {
+            if controller.isContextChangeCapture { return .contextChange }
+            if controller.isEvaluating { return .hidden }
+            return .homeObserving
+        }
+        return .homeIdle
     }
 
     var body: some View {
@@ -382,11 +407,12 @@ struct ContentView: View {
                 }
 
                 Group {
-                    if !appState.hasCompletedOnboarding {
+                    switch footerState {
+                    case .hidden:
                         Spacer()
-                    } else if navManager.currentPage == .home {
+                    case .homeIdle:
                         BottomNavBar(
-                            isObserving: controller.isObserving,
+                            isObserving: false,
                             onObserveTap: {
                                 guard serviceManager.progress.phase == .idle || serviceManager.progress.phase == .resolved else { return }
                                 activeHistoryEntryId = nil
@@ -418,7 +444,35 @@ struct ContentView: View {
                                 }
                             }
                         )
-                    } else {
+                    case .homeObserving:
+                        BottomNavBar(
+                            isObserving: true,
+                            onObserveTap: {},
+                            onHoldStart: {
+                                Task { await serviceManager.upgradeToHold() }
+                                controller.upgradeCaptureToHold()
+                            },
+                            onHoldEnd: {
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(500))
+                                    serviceManager.endCapture()
+                                }
+                            }
+                        )
+                    case .contextChange:
+                        HStack {
+                            NavButton(
+                                iconName: "cancel",
+                                fg: GridColor.tint.uiColor.swiftUI,
+                                bg: GridColor.bold.uiColor.swiftUI
+                            ) {
+                                cancelContextChange()
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 40)
+                        .padding(.bottom, 16)
+                    case .subpage:
                         HStack {
                             NavButton(
                                 iconName: "arrow-back",
@@ -483,6 +537,17 @@ struct ContentView: View {
         }
         .onChange(of: serviceManager.progress.phase) { _, newPhase in
             if newPhase == .resolved {
+                // Context change was cancelled — snapshot already cleared, skip result handling
+                let isContextChange = controller.isContextChangeCapture
+                if isContextChange && contextChangeSnapshot == nil {
+                    return
+                }
+
+                // Clear snapshot on successful context change resolution
+                if isContextChange {
+                    contextChangeSnapshot = nil
+                }
+
                 // Tap mode with no Shazam match → return to landing with "nothing observed"
                 // Only applies to actual mic observations, not shortcuts/queries
                 let context = controller.captureRenderer.queryContext
@@ -779,6 +844,7 @@ struct ContentView: View {
 
     private func makeEntitySubject() {
         guard let info = infoRenderer, info.mode == .entity else { return }
+        contextChangeSnapshot = createContextSnapshot()
         let entityName = info.entityName
         let priorSubject = homeRenderer?.graphSubject.label ?? ""
         let location = homeRenderer?.locationLabel ?? ""
@@ -800,6 +866,7 @@ struct ContentView: View {
 
     private func queryWithYearChange() {
         guard let home = homeRenderer, home.hasObservations else { return }
+        contextChangeSnapshot = createContextSnapshot()
         let subject = home.graphSubject.label
         let location = home.locationLabel
 
@@ -821,6 +888,7 @@ struct ContentView: View {
 
     private func queryWithLocationChange(newLocation: String, locationResult: LocationResult? = nil) {
         guard let home = homeRenderer, home.hasObservations else { return }
+        contextChangeSnapshot = createContextSnapshot()
         let subject = home.graphSubject.label
 
         // Location change: subject + year are fixed, location is new
@@ -1071,5 +1139,55 @@ struct ContentView: View {
 
     private func refreshCircaYear() {
         homeRenderer?.circaYear = generateCircaYear()
+    }
+
+    // MARK: - Context Change Snapshot & Cancel
+
+    private func createContextSnapshot() -> ContextChangeSnapshot {
+        let home = homeRenderer
+        return ContextChangeSnapshot(
+            hasObservations: home?.hasObservations ?? false,
+            graphSubject: home?.graphSubject ?? GraphSubject(label: ""),
+            graphItems: home?.graphItems ?? [],
+            connections: home?.connections ?? [],
+            bio: home?.bio ?? "",
+            birthInfo: home?.birthInfo ?? "",
+            locationLabel: home?.locationLabel ?? "",
+            selectedYear: selectedYear,
+            selectedCoordinate: selectedCoordinate,
+            activeHistoryEntryId: activeHistoryEntryId
+        )
+    }
+
+    private func cancelContextChange() {
+        guard let snapshot = contextChangeSnapshot else { return }
+
+        // Cancel Claude task, reset progress
+        serviceManager.cancelContextChange()
+
+        // Restore home renderer state
+        if let home = homeRenderer {
+            home.hasObservations = snapshot.hasObservations
+            home.graphSubject = snapshot.graphSubject
+            home.graphItems = snapshot.graphItems
+            home.connections = snapshot.connections
+            home.bio = snapshot.bio
+            home.birthInfo = snapshot.birthInfo
+            home.locationLabel = snapshot.locationLabel
+        }
+
+        // Restore triad state
+        selectedYear = snapshot.selectedYear
+        selectedCoordinate = snapshot.selectedCoordinate
+        activeHistoryEntryId = snapshot.activeHistoryEntryId
+
+        // Audio player keeps playing — no fade was applied for context changes
+
+        // Exit capture with restored content
+        controller.exitCapture { grid in
+            populateGrid(grid)
+        }
+
+        contextChangeSnapshot = nil
     }
 }

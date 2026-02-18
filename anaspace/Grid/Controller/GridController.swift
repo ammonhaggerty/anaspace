@@ -6,6 +6,8 @@ final class GridController {
     var metrics: GridMetrics?
     var isObserving = false
     var isCapturing = false
+    var isEvaluating = false
+    var isContextChangeCapture = false
     let cascade = CascadeAnimation()
     let observe = ObserveAnimation()
     let wipe = WipeAnimation()
@@ -49,18 +51,23 @@ final class GridController {
         isCapturing = true
         isObserving = true
         pendingHoldUpgrade = false
+        isEvaluating = false
+        isContextChangeCapture = switch queryContext {
+        case .yearChange, .locationChange, .subjectChange: true
+        case .observation, .shortcut: false
+        }
         idlePulse.cancel()
 
         wipe.wipeOut(on: grid) { [weak self] in
             guard let self, let grid = self.grid else { return }
             onWipeOutComplete()
 
-            // Clear content + structure, fill structure with ░
+            // Clear content + structure, fill structure with ░ (leave last row for audio player)
             grid.clearLayer(.content)
             grid.clearLayer(.structure)
             let cols = GridMetrics.columns
             let fillState = CellState(character: "\u{2591}", color: .tint, bold: false)
-            for row in 2..<grid.rowCount {
+            for row in 2..<(grid.rowCount - 1) {
                 let states = [CellState](repeating: fillState, count: cols)
                 grid.setRow(layer: .structure, row: row, states: states)
             }
@@ -83,8 +90,9 @@ final class GridController {
 
             // Only run ObserveAnimation for observing mode (not listening)
             if effectiveMode == .observing {
+                let lastRow = grid.rowCount - 1
                 self.observe.config.isIndefinite = true
-                self.observe.config.skipRows = [0, 1]
+                self.observe.config.skipRows = [0, 1, lastRow]
                 self.observe.run(on: grid) {}
             }
 
@@ -122,26 +130,28 @@ final class GridController {
 
     func transitionToEvaluating() {
         guard let grid else { return }
+        isEvaluating = true
 
         // Clear structure rows 2-3 for signal carousel breathing room
         grid.clearRow(layer: .structure, row: 2)
         grid.clearRow(layer: .structure, row: 3)
 
         // Start observe animation with contracting circles if not already running
+        let lastRow = grid.rowCount - 1
         if !observe.isRunning {
             observe.config.isIndefinite = true
-            observe.config.skipRows = [0, 1, 2, 3]
+            observe.config.skipRows = [0, 1, 2, 3, lastRow]
             observe.config.isEvaluating = true
             observe.run(on: grid) {}
         } else {
             // Expand observe animation skipRows and switch to contracting circles
-            observe.config.skipRows = [0, 1, 2, 3]
+            observe.config.skipRows = [0, 1, 2, 3, lastRow]
             observe.config.isEvaluating = true
             observe.resetWaves()
         }
 
-        // Clear any transcript or leftover content on rows 2+
-        for row in 2..<grid.rowCount {
+        // Clear any transcript or leftover content on rows 2+ (leave last row for audio player)
+        for row in 2..<(grid.rowCount - 1) {
             grid.clearRow(layer: .content, row: row)
         }
 
@@ -170,6 +180,8 @@ final class GridController {
             self.wipe.wipeIn(on: grid) { [weak self] in
                 self?.isCapturing = false
                 self?.isObserving = false
+                self?.isEvaluating = false
+                self?.isContextChangeCapture = false
                 self?.pendingHoldUpgrade = false
                 self?.observe.config.isIndefinite = false
                 self?.observe.config.skipRows = []
