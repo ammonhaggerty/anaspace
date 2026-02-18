@@ -79,57 +79,35 @@ final class HistoryPageRenderer: PageRenderer {
 
     // MARK: - Reset Button
 
+    private static let resetLabel = "NEW SESSION"
+
     private func renderResetButton(into grid: CharacterGrid, startRow: Int) -> Int {
         guard startRow + 2 < grid.rowCount else { return startRow }
 
         resetButtonRow = startRow
 
-        let text = "RESET TO OBSERVE PAGE"
-        let bracketLeft = insetCol
-        let bracketRight = insetCol + contentWidth - 1
+        let buttonWidth = Self.resetLabel.count + 4
+        let buttonCol = (GridMetrics.columns - buttonWidth) / 2
 
-        // Row 1: top bracket corners
-        grid.setCell(
-            layer: .content, row: startRow, col: bracketLeft,
-            state: CellState(character: "\u{250C}", color: .bold, bold: false)  // ┌
-        )
-        grid.setCell(
-            layer: .content, row: startRow, col: bracketRight,
-            state: CellState(character: "\u{2510}", color: .bold, bold: false)  // ┐
+        let size = BracketButton.render(
+            into: grid,
+            row: startRow, col: buttonCol,
+            lines: [Self.resetLabel]
         )
 
-        // Row 2: bracket extensions + text centered
-        let textRow = startRow + 1
-        let innerWidth = bracketRight - bracketLeft - 1  // cols available between brackets
-        let leftPad = (innerWidth - text.count) / 2
+        return startRow + size.height
+    }
 
-        grid.setCell(
-            layer: .content, row: textRow, col: bracketLeft,
-            state: CellState(character: "\u{2502}", color: .bold, bold: false)  // │
+    func renderResetButtonPressed(into grid: CharacterGrid) {
+        guard resetButtonRow >= 0 else { return }
+        let buttonWidth = Self.resetLabel.count + 4
+        let buttonCol = (GridMetrics.columns - buttonWidth) / 2
+        BracketButton.render(
+            into: grid,
+            row: resetButtonRow, col: buttonCol,
+            lines: [Self.resetLabel],
+            pressed: true
         )
-        grid.setCell(
-            layer: .content, row: textRow, col: bracketRight,
-            state: CellState(character: "\u{2502}", color: .bold, bold: false)  // │
-        )
-
-        for (i, ch) in text.enumerated() {
-            grid.setCell(
-                layer: .content, row: textRow, col: bracketLeft + 1 + leftPad + i,
-                state: CellState(character: ch, color: .bold, bold: false)
-            )
-        }
-
-        // Row 3: bottom bracket corners
-        grid.setCell(
-            layer: .content, row: startRow + 2, col: bracketLeft,
-            state: CellState(character: "\u{2514}", color: .bold, bold: false)  // └
-        )
-        grid.setCell(
-            layer: .content, row: startRow + 2, col: bracketRight,
-            state: CellState(character: "\u{2518}", color: .bold, bold: false)  // ┘
-        )
-
-        return startRow + 3
     }
 }
 

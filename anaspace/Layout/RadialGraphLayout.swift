@@ -24,10 +24,16 @@ struct GraphItem {
 
 struct PlacedItem: Identifiable {
     let index: Int       // Index into the original items array
-    let row: Int         // Grid row (absolute, including startRow offset)
+    let row: Int         // Grid row of glyph (absolute, including startRow offset)
     let col: Int         // Grid column (left edge of block)
     let width: Int       // Block width in columns
-    let height: Int      // Block height in rows
+    let height: Int      // Block height in rows (glyph + text lines)
+
+    // Text-only bounds for hit testing (excludes glyph row)
+    let textRow: Int     // First text row (absolute)
+    let textCol: Int     // Left edge of text
+    let textWidth: Int   // Max text line width
+    let textHeight: Int  // Number of text lines
 
     var id: Int { index }
 }
@@ -104,7 +110,7 @@ struct RadialGraphLayout {
         let centerRow = areaRows / 2 - 1
         let centerCol = areaCols / 2
 
-        // --- Place subject (● glyph + bold label) ---
+        // --- Place subject with bracket decoration ---
 
         let subjectLabel = subject.label.uppercased()
         let subjectText: String
@@ -115,76 +121,15 @@ struct RadialGraphLayout {
         }
 
         let subLabelStart = max(minCol, centerCol - subjectText.count / 2)
-        let subGlyphCol = subLabelStart + subjectText.count / 2
-
-        grid.setCell(
-            layer: .content,
+        let bracketCol = max(minCol, subLabelStart - 2)
+        let bracketSize = BracketButton.render(
+            into: grid,
             row: startRow + centerRow,
-            col: subGlyphCol,
-            state: CellState(character: "\u{25CF}", color: .focus, bold: true)
+            col: bracketCol,
+            lines: [subjectText],
+            glyph: (character: "\u{25CF}", color: .focus)
         )
-        occupancy.mark(row: centerRow, col: subGlyphCol, width: 1, height: 1)
-
-        let subLabelRow = centerRow + 1
-        if subLabelRow <= maxRow {
-            for (i, ch) in subjectText.enumerated() {
-                let c = subLabelStart + i
-                guard c <= maxCol else { break }
-                grid.setCell(
-                    layer: .content,
-                    row: startRow + subLabelRow,
-                    col: c,
-                    state: CellState(character: ch, color: .bold, bold: true)
-                )
-            }
-            occupancy.mark(
-                row: subLabelRow, col: subLabelStart,
-                width: min(subjectText.count, maxCol - subLabelStart + 1), height: 1
-            )
-        }
-
-        // --- Bracket decoration around subject ---
-        let bracketLeft = max(minCol, subLabelStart - 2)
-        let bracketRight = min(maxCol, subLabelStart + subjectText.count + 1)
-
-        // Top bracket corners (same row as glyph)
-        grid.setCell(
-            layer: .content, row: startRow + centerRow, col: bracketLeft,
-            state: CellState(character: "\u{250C}", color: .bold, bold: false)  // ┌
-        )
-        grid.setCell(
-            layer: .content, row: startRow + centerRow, col: bracketRight,
-            state: CellState(character: "\u{2510}", color: .bold, bold: false)  // ┐
-        )
-        occupancy.mark(row: centerRow, col: bracketLeft, width: 1, height: 1)
-        occupancy.mark(row: centerRow, col: bracketRight, width: 1, height: 1)
-
-        // Middle bracket extensions (same row as label)
-        if subLabelRow <= maxRow {
-            grid.setCell(
-                layer: .content, row: startRow + subLabelRow, col: bracketLeft,
-                state: CellState(character: "\u{2502}", color: .bold, bold: false)  // │
-            )
-            grid.setCell(
-                layer: .content, row: startRow + subLabelRow, col: bracketRight,
-                state: CellState(character: "\u{2502}", color: .bold, bold: false)  // │
-            )
-        }
-
-        // Bottom bracket corners (one row below label)
-        let bottomBracketRow = subLabelRow + 1
-        if bottomBracketRow <= maxRow {
-            grid.setCell(
-                layer: .content, row: startRow + bottomBracketRow, col: bracketLeft,
-                state: CellState(character: "\u{2514}", color: .bold, bold: false)  // └
-            )
-            grid.setCell(
-                layer: .content, row: startRow + bottomBracketRow, col: bracketRight,
-                state: CellState(character: "\u{2518}", color: .bold, bold: false)  // ┘
-            )
-            occupancy.mark(row: bottomBracketRow, col: bracketLeft, width: 1, height: 1)
-            occupancy.mark(row: bottomBracketRow, col: bracketRight, width: 1, height: 1)
-        }
+        occupancy.mark(row: centerRow, col: bracketCol, width: bracketSize.width, height: bracketSize.height)
 
         // --- Place items ---
 
@@ -336,7 +281,11 @@ struct RadialGraphLayout {
                                 row: startRow + tryRow,
                                 col: blockLeft,
                                 width: blockW,
-                                height: blockH
+                                height: blockH,
+                                textRow: startRow + tryRow + 1,
+                                textCol: textCol,
+                                textWidth: textWidth,
+                                textHeight: allTextLines.count
                             ))
                             placed = true
                         }

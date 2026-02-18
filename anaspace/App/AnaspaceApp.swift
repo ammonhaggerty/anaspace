@@ -152,7 +152,16 @@ struct ContentView: View {
                                 x: GridMetrics.sideMargin + CGFloat((GridMetrics.columns - 16) / 2) * metrics.cellWidth,
                                 y: GridMetrics.topPadding + CGFloat(centerRow - 1) * metrics.lineHeight
                             )
-                            .onTapGesture { navigateToInfo() }
+                            .onTapGesture {
+                                Task {
+                                    if let grid = controller.grid, let home = homeRenderer {
+                                        home.renderSubjectPressed(into: grid)
+                                        grid.render()
+                                        try? await Task.sleep(for: .milliseconds(300))
+                                    }
+                                    navigateToInfo()
+                                }
+                            }
                     }
                 }
                 .overlay(alignment: .topLeading) {
@@ -163,22 +172,25 @@ struct ContentView: View {
                        let home = homeRenderer,
                        home.hasObservations,
                        let metrics = controller.metrics {
-                        ForEach(home.placements, id: \.index) { placement in
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .frame(
-                                    width: CGFloat(placement.width + 2) * metrics.cellWidth,
-                                    height: CGFloat(placement.height + 2) * metrics.lineHeight
-                                )
-                                .offset(
-                                    x: GridMetrics.sideMargin + CGFloat(max(0, placement.col - 1)) * metrics.cellWidth,
-                                    y: GridMetrics.topPadding + CGFloat(max(0, placement.row - 1)) * metrics.lineHeight
-                                )
-                                .onTapGesture {
-                                    guard placement.index < home.connections.count else { return }
-                                    navigateToEntityInfo(home.connections[placement.index])
-                                }
+                        ZStack(alignment: .topLeading) {
+                            ForEach(home.placements, id: \.index) { placement in
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .frame(
+                                        width: CGFloat(placement.textWidth + 2) * metrics.cellWidth,
+                                        height: CGFloat(placement.textHeight + 2) * metrics.lineHeight
+                                    )
+                                    .offset(
+                                        x: GridMetrics.sideMargin + CGFloat(max(0, placement.textCol - 1)) * metrics.cellWidth,
+                                        y: GridMetrics.topPadding + CGFloat(max(0, placement.textRow - 1)) * metrics.lineHeight
+                                    )
+                                    .onTapGesture {
+                                        guard placement.index < home.connections.count else { return }
+                                        navigateToEntityInfo(home.connections[placement.index])
+                                    }
+                            }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
                 .overlay(alignment: .topLeading) {
@@ -188,40 +200,50 @@ struct ContentView: View {
                        navManager.currentPage == .history,
                        let history = historyRenderer,
                        let metrics = controller.metrics {
-                        // Reset button (3-row bracket area)
-                        if history.resetButtonRow >= 0 {
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .frame(
-                                    width: CGFloat(GridMetrics.columns) * metrics.cellWidth,
-                                    height: CGFloat(3) * metrics.lineHeight
-                                )
-                                .offset(
-                                    x: GridMetrics.sideMargin,
-                                    y: GridMetrics.topPadding + CGFloat(history.resetButtonRow) * metrics.lineHeight
-                                )
-                                .onTapGesture {
-                                    resetToObservePage()
-                                }
-                        }
-                        // History entries
-                        ForEach(Array(history.entryRows.enumerated()), id: \.offset) { index, row in
-                            if index < history.entries.count {
+                        ZStack(alignment: .topLeading) {
+                            // Reset button (3-row bracket area)
+                            if history.resetButtonRow >= 0 {
                                 Color.clear
                                     .contentShape(Rectangle())
                                     .frame(
                                         width: CGFloat(GridMetrics.columns) * metrics.cellWidth,
-                                        height: metrics.lineHeight
+                                        height: CGFloat(3) * metrics.lineHeight
                                     )
                                     .offset(
                                         x: GridMetrics.sideMargin,
-                                        y: GridMetrics.topPadding + CGFloat(row) * metrics.lineHeight
+                                        y: GridMetrics.topPadding + CGFloat(history.resetButtonRow) * metrics.lineHeight
                                     )
                                     .onTapGesture {
-                                        restoreFromHistory(history.entries[index])
+                                        Task {
+                                            if let grid = controller.grid, let history = historyRenderer {
+                                                history.renderResetButtonPressed(into: grid)
+                                                grid.render()
+                                                try? await Task.sleep(for: .milliseconds(300))
+                                            }
+                                            resetToObservePage()
+                                        }
                                     }
                             }
+                            // History entries
+                            ForEach(Array(history.entryRows.enumerated()), id: \.offset) { index, row in
+                                if index < history.entries.count {
+                                    Color.clear
+                                        .contentShape(Rectangle())
+                                        .frame(
+                                            width: CGFloat(GridMetrics.columns) * metrics.cellWidth,
+                                            height: metrics.lineHeight
+                                        )
+                                        .offset(
+                                            x: GridMetrics.sideMargin,
+                                            y: GridMetrics.topPadding + CGFloat(row) * metrics.lineHeight
+                                        )
+                                        .onTapGesture {
+                                            restoreFromHistory(history.entries[index])
+                                        }
+                                }
+                            }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
                 .overlay(alignment: .topLeading) {
@@ -233,21 +255,31 @@ struct ContentView: View {
                        let home = homeRenderer,
                        !home.ideaCardRegions.isEmpty,
                        let metrics = controller.metrics {
-                        ForEach(Array(home.ideaCardRegions.enumerated()), id: \.offset) { index, region in
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .frame(
-                                    width: CGFloat(region.width) * metrics.cellWidth,
-                                    height: CGFloat(region.height) * metrics.lineHeight
-                                )
-                                .offset(
-                                    x: GridMetrics.sideMargin + CGFloat(region.col) * metrics.cellWidth,
-                                    y: GridMetrics.topPadding + CGFloat(region.row) * metrics.lineHeight
-                                )
-                                .onTapGesture {
-                                    handleIdeaCardTap(index: index)
-                                }
+                        ZStack(alignment: .topLeading) {
+                            ForEach(Array(home.ideaCardRegions.enumerated()), id: \.offset) { index, region in
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .frame(
+                                        width: CGFloat(region.width) * metrics.cellWidth,
+                                        height: CGFloat(region.height) * metrics.lineHeight
+                                    )
+                                    .offset(
+                                        x: GridMetrics.sideMargin + CGFloat(region.col) * metrics.cellWidth,
+                                        y: GridMetrics.topPadding + CGFloat(region.row) * metrics.lineHeight
+                                    )
+                                    .onTapGesture {
+                                        Task {
+                                            if let grid = controller.grid, let home = homeRenderer {
+                                                home.renderIdeaCardPressed(index: index, into: grid)
+                                                grid.render()
+                                                try? await Task.sleep(for: .milliseconds(300))
+                                            }
+                                            handleIdeaCardTap(index: index)
+                                        }
+                                    }
+                            }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
                 .overlay(alignment: .topLeading) {
@@ -349,6 +381,7 @@ struct ContentView: View {
                             onObserveTap: {
                                 guard serviceManager.progress.phase == .idle || serviceManager.progress.phase == .resolved else { return }
                                 activeHistoryEntryId = nil
+                                homeRenderer?.showNothingObserved = false
                                 Task { await serviceManager.beginCapture() }
                                 controller.enterCapture(
                                     mode: .observing,
@@ -439,9 +472,18 @@ struct ContentView: View {
         }
         .onChange(of: serviceManager.progress.phase) { _, newPhase in
             if newPhase == .resolved {
-                handleResultUpdate(saveToHistory: true)
-                controller.exitCapture { grid in
-                    populateGrid(grid)
+                // Tap mode with no Shazam match → return to landing with "nothing observed"
+                if serviceManager.progress.mode == .tap,
+                   serviceManager.progress.shazamResult == nil {
+                    homeRenderer?.showNothingObserved = true
+                    controller.exitCapture { grid in
+                        populateGrid(grid)
+                    }
+                } else {
+                    handleResultUpdate(saveToHistory: true)
+                    controller.exitCapture { grid in
+                        populateGrid(grid)
+                    }
                 }
             }
         }
@@ -538,7 +580,8 @@ struct ContentView: View {
 
         if appState.hasCompletedOnboarding,
            navManager.currentPage == .home,
-           homeRenderer?.hasObservations == false {
+           homeRenderer?.hasObservations == false,
+           homeRenderer?.showNothingObserved != true {
             controller.startIdlePulse()
         }
     }
@@ -559,7 +602,9 @@ struct ContentView: View {
         serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
         grid.render()
 
-        if navManager.currentPage == .home, homeRenderer?.hasObservations == false {
+        if navManager.currentPage == .home,
+           homeRenderer?.hasObservations == false,
+           homeRenderer?.showNothingObserved != true {
             controller.startIdlePulse()
         }
     }
@@ -942,6 +987,7 @@ struct ContentView: View {
 
     private func handleIdeaCardTap(index: Int) {
         guard serviceManager.progress.phase == .idle || serviceManager.progress.phase == .resolved else { return }
+        homeRenderer?.showNothingObserved = false
 
         // Build location string from current GPS
         let locationLabel: String

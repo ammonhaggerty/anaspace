@@ -12,12 +12,19 @@ final class HomePageRenderer: PageRenderer {
     var placements: [PlacedItem] = []
     var bio: String = ""
     var birthInfo: String = ""
+    var showNothingObserved = false
 
     /// Circa year displayed on the "THIS SPOT" card, set externally by ContentView.
     var circaYear: Int = 1975
 
     /// Card tap regions: (row, col, width, height) for each of the 4 idea cards.
     var ideaCardRegions: [(row: Int, col: Int, width: Int, height: Int)] = []
+    /// Card text content for each idea card (for pressed-state re-rendering).
+    private(set) var ideaCardTexts: [(String, String)] = []
+
+    /// Subject bracket region in the radial graph (for pressed-state re-rendering).
+    private(set) var subjectBracketRegion: (row: Int, col: Int, width: Int, height: Int) = (-1, 0, 0, 0)
+    private(set) var subjectDisplayText: String = ""
 
     var hiddenStructureRows: Set<Int> {
         hasObservations ? Set(0..<11) : []
@@ -67,30 +74,75 @@ final class HomePageRenderer: PageRenderer {
             startRow: 12,
             endRow: grid.rowCount - 2
         )
+
+        // Compute subject bracket region for pressed-state rendering
+        let graphStartRow = 12
+        let graphEndRow = grid.rowCount - 2
+        let areaRows = graphEndRow - graphStartRow + 1
+        let centerRow = areaRows / 2 - 1
+        let centerCol = GridMetrics.columns / 2
+
+        let subjectLabel = graphSubject.label.uppercased()
+        if let firstLine = TextWrapper.wrap(subjectLabel, maxWidth: 26, maxLines: 1).first {
+            subjectDisplayText = firstLine
+        } else {
+            subjectDisplayText = String(subjectLabel.prefix(26))
+        }
+        let subLabelStart = max(1, centerCol - subjectDisplayText.count / 2)
+        let bracketCol = max(1, subLabelStart - 2)
+        let bracketWidth = subjectDisplayText.count + 4
+        subjectBracketRegion = (row: graphStartRow + centerRow, col: bracketCol, width: bracketWidth, height: 3)
     }
 
     // MARK: - Ready to Observe
 
     private func renderReadyState(into grid: CharacterGrid) {
         let cols = GridMetrics.columns
-
-        // Circle glyph — centered, one row above the text (pulsed by IdlePulseAnimation)
         let readyRow = grid.rowCount / 3 - 4
-        let circleCol = cols / 2
-        grid.setCell(
-            layer: .content, row: readyRow - 1, col: circleCol,
-            state: CellState(character: "\u{25CF}", color: .focus, bold: false)
-        )
 
-        // "READY TO OBSERVE" — centered
-        let readyText = "READY TO OBSERVE"
-        let readyCol = max(0, (cols - readyText.count) / 2)
-        for (i, ch) in readyText.enumerated() {
-            guard readyCol + i < cols else { break }
+        if showNothingObserved {
+            // ⨀ glyph centered above text
+            let glyphCol = cols / 2
             grid.setCell(
-                layer: .content, row: readyRow, col: readyCol + i,
-                state: CellState(character: ch, color: .bold, bold: false)
+                layer: .content, row: readyRow - 1, col: glyphCol,
+                state: CellState(character: "\u{2A00}", color: .bold, bold: false)
             )
+
+            // NOTHING OBSERVED (bold) + guidance lines
+            let lines: [(text: String, isBold: Bool)] = [
+                ("NOTHING OBSERVED", true),
+                ("TRY AN IDEA OR", false),
+                ("TAP/HOLD TO SPEAK", false),
+            ]
+            for (lineIndex, line) in lines.enumerated() {
+                let row = readyRow + lineIndex
+                let col = max(0, (cols - line.text.count) / 2)
+                for (i, ch) in line.text.enumerated() {
+                    guard col + i < cols else { break }
+                    grid.setCell(
+                        layer: .content, row: row, col: col + i,
+                        state: CellState(character: ch, color: .bold, bold: line.isBold)
+                    )
+                }
+            }
+        } else {
+            // Circle glyph — centered, one row above the text (pulsed by IdlePulseAnimation)
+            let circleCol = cols / 2
+            grid.setCell(
+                layer: .content, row: readyRow - 1, col: circleCol,
+                state: CellState(character: "\u{25CF}", color: .focus, bold: false)
+            )
+
+            // "READY TO OBSERVE" — centered
+            let readyText = "READY TO OBSERVE"
+            let readyCol = max(0, (cols - readyText.count) / 2)
+            for (i, ch) in readyText.enumerated() {
+                guard readyCol + i < cols else { break }
+                grid.setCell(
+                    layer: .content, row: readyRow, col: readyCol + i,
+                    state: CellState(character: ch, color: .bold, bold: false)
+                )
+            }
         }
 
         // IDEAS section — 4 action cards
@@ -103,9 +155,19 @@ final class HomePageRenderer: PageRenderer {
         let cols = GridMetrics.columns
         let playerRow = grid.rowCount - 1
 
-        // Card dimensions
-        let cardWidth = 14
-        let cardHeight = 4
+        // Card content: (line1, line2)
+        let cards: [(String, String)] = [
+            ("WHAT'S HOT", "RIGHT HERE"),
+            ("WHO SHAPED", "THIS PLACE"),
+            ("THIS SPOT", "CIRCA \(circaYear)"),
+            ("WORDS THAT", "MADE SONGS"),
+        ]
+        ideaCardTexts = cards
+
+        // Card dimensions (derived from text)
+        let maxTextWidth = cards.flatMap { [$0.0, $0.1] }.map(\.count).max() ?? 10
+        let cardWidth = maxTextWidth + 4
+        let cardHeight = 4  // 2 text lines + 2 border rows
         let leftCol = 1
         let rightCol = cols - cardWidth - 1
 
@@ -128,14 +190,6 @@ final class HomePageRenderer: PageRenderer {
             )
         }
 
-        // Card content: (line1, line2)
-        let cards: [(String, String)] = [
-            ("WHAT'S HOT", "RIGHT HERE"),
-            ("WHO SHAPED", "THIS PLACE"),
-            ("THIS SPOT", "CIRCA \(circaYear)"),
-            ("WORDS THAT", "MADE SONGS"),
-        ]
-
         // Card positions: top-left, top-right, bottom-left, bottom-right
         let positions = [
             (row: topCardRow, col: leftCol),
@@ -148,57 +202,35 @@ final class HomePageRenderer: PageRenderer {
 
         for (index, card) in cards.enumerated() {
             let pos = positions[index]
-            renderCard(
+            let size = BracketButton.render(
                 into: grid,
                 row: pos.row, col: pos.col,
-                width: cardWidth, height: cardHeight,
-                line1: card.0, line2: card.1
+                lines: [card.0, card.1]
             )
-            ideaCardRegions.append((row: pos.row, col: pos.col, width: cardWidth, height: cardHeight))
+            ideaCardRegions.append((row: pos.row, col: pos.col, width: size.width, height: size.height))
         }
     }
 
-    private func renderCard(
-        into grid: CharacterGrid,
-        row: Int, col: Int,
-        width: Int, height: Int,
-        line1: String, line2: String
-    ) {
-        guard row + height <= grid.rowCount else { return }
+    // MARK: - Pressed State Rendering
 
-        // Top border: ┌     ┐
-        grid.setCell(layer: .content, row: row, col: col,
-                     state: CellState(character: "\u{250C}", color: .bold, bold: false))
-        grid.setCell(layer: .content, row: row, col: col + width - 1,
-                     state: CellState(character: "\u{2510}", color: .bold, bold: false))
+    func renderIdeaCardPressed(index: Int, into grid: CharacterGrid) {
+        guard index < ideaCardRegions.count, index < ideaCardTexts.count else { return }
+        let region = ideaCardRegions[index]
+        let texts = ideaCardTexts[index]
+        BracketButton.render(into: grid, row: region.row, col: region.col,
+                             lines: [texts.0, texts.1], pressed: true)
+    }
 
-        // Line 1: ╷ TEXT ╷
-        grid.setCell(layer: .content, row: row + 1, col: col,
-                     state: CellState(character: "\u{2502}", color: .bold, bold: false))
-        for (i, ch) in line1.enumerated() {
-            guard col + 2 + i < col + width - 1 else { break }
-            grid.setCell(layer: .content, row: row + 1, col: col + 2 + i,
-                         state: CellState(character: ch, color: .bold, bold: false))
-        }
-        grid.setCell(layer: .content, row: row + 1, col: col + width - 1,
-                     state: CellState(character: "\u{2502}", color: .bold, bold: false))
-
-        // Line 2: ╷ TEXT ╷
-        grid.setCell(layer: .content, row: row + 2, col: col,
-                     state: CellState(character: "\u{2502}", color: .bold, bold: false))
-        for (i, ch) in line2.enumerated() {
-            guard col + 2 + i < col + width - 1 else { break }
-            grid.setCell(layer: .content, row: row + 2, col: col + 2 + i,
-                         state: CellState(character: ch, color: .bold, bold: false))
-        }
-        grid.setCell(layer: .content, row: row + 2, col: col + width - 1,
-                     state: CellState(character: "\u{2502}", color: .bold, bold: false))
-
-        // Bottom border: └     ┘
-        grid.setCell(layer: .content, row: row + 3, col: col,
-                     state: CellState(character: "\u{2514}", color: .bold, bold: false))
-        grid.setCell(layer: .content, row: row + 3, col: col + width - 1,
-                     state: CellState(character: "\u{2518}", color: .bold, bold: false))
+    func renderSubjectPressed(into grid: CharacterGrid) {
+        guard subjectBracketRegion.row >= 0 else { return }
+        BracketButton.render(
+            into: grid,
+            row: subjectBracketRegion.row,
+            col: subjectBracketRegion.col,
+            lines: [subjectDisplayText],
+            glyph: (character: "\u{25CF}", color: .focus),
+            pressed: true
+        )
     }
 
 }
