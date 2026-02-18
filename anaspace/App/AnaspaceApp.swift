@@ -484,7 +484,14 @@ struct ContentView: View {
         .onChange(of: serviceManager.progress.phase) { _, newPhase in
             if newPhase == .resolved {
                 // Tap mode with no Shazam match → return to landing with "nothing observed"
-                if serviceManager.progress.mode == .tap,
+                // Only applies to actual mic observations, not shortcuts/queries
+                let context = controller.captureRenderer.queryContext
+                let isDirectQuery: Bool = switch context {
+                case .shortcut, .subjectChange, .yearChange, .locationChange: true
+                case .observation: false
+                }
+                if !isDirectQuery,
+                   serviceManager.progress.mode == .tap,
                    serviceManager.progress.shazamResult == nil {
                     homeRenderer?.showNothingObserved = true
                     controller.exitCapture { grid in
@@ -641,12 +648,25 @@ struct ContentView: View {
         home.bio = result.bio
         home.birthInfo = result.birthInfo
 
-        selectedYear = result.year
-
-        // Update location from progress
-        if let loc = serviceManager.progress.location {
-            selectedCoordinate = loc.coordinate
-            homeRenderer?.locationLabel = LocationService.displayLabel(for: loc)
+        // Triad rules — location is generally fixed, year flexes with subject relevance.
+        let context = controller.captureRenderer.queryContext
+        switch context {
+        case .yearChange:
+            // User picked the year — keep it; location fixed; subject from API
+            break
+        case .subjectChange:
+            // New subject — year flexes to most relevant era; location fixed
+            selectedYear = result.year
+        case .locationChange:
+            // User picked location (already set) — year fixed; subject from API
+            break
+        case .observation, .shortcut:
+            // Fresh observation — update everything from result + GPS
+            selectedYear = result.year
+            if let loc = serviceManager.progress.location {
+                selectedCoordinate = loc.coordinate
+                homeRenderer?.locationLabel = LocationService.displayLabel(for: loc)
+            }
         }
 
         // Save to history only on final resolution (not streaming updates)
@@ -760,12 +780,14 @@ struct ContentView: View {
     private func makeEntitySubject() {
         guard let info = infoRenderer, info.mode == .entity else { return }
         let entityName = info.entityName
+        let priorSubject = homeRenderer?.graphSubject.label ?? ""
+        let location = homeRenderer?.locationLabel ?? ""
 
         // Reset nav to home silently — exitCapture will restore home content
         navManager.resetToHome()
 
         // Go directly into capture/analysis from the current page
-        serviceManager.querySubject(entityName)
+        serviceManager.querySubjectChange(newSubject: entityName, priorSubject: priorSubject, location: location)
         controller.enterCapture(
             mode: .observing,
             progress: serviceManager.progress,

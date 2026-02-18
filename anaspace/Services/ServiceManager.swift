@@ -231,15 +231,15 @@ final class ServiceManager {
             // Check: Hard timeout (tap mode uses shazam timeout as hard limit)
             if progress.elapsed >= config.shazamTimeoutSeconds {
                 haptics.playTimeout()
-                collectSignals()
 
                 speech.deactivate()
                 soundAnalysis.deactivate()
                 haptics.stopPattern()
                 audio.deactivate()
 
-                progress.transitionTo(.processing)
-                processResults(trigger: .hardTimeout)
+                // No Shazam match in tap mode — resolve immediately without Claude
+                progress.logEvent("Tap timeout with no Shazam match")
+                resolve()
                 return
             }
 
@@ -520,12 +520,12 @@ final class ServiceManager {
     // MARK: - Direct Query
 
     /// Send a direct text query to Claude (e.g. from + SUBJECT button) without audio capture.
-    func querySubject(_ name: String) {
+    func querySubjectChange(newSubject: String, priorSubject: String, location: String) {
         audioPlayer.beginFadeAndPrepareForCapture()
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
-        progress.setLocation(location.currentResult)
+        progress.setLocation(self.location.currentResult)
         progress.setClaudeProcessing(true)
 
         claudeTask = Task {
@@ -536,13 +536,9 @@ final class ServiceManager {
                     resolve()
                     return
                 }
-                let signals = ObservationSignals(
-                    transcript: TranscriptResult(text: name, confidence: 1.0, isFinal: true),
-                    location: progress.location,
-                    mode: .hold,
-                    resolutionTrigger: .userRelease
+                let result = try await claude.processSubjectChange(
+                    newSubject: newSubject, priorSubject: priorSubject, location: location
                 )
-                let result = try await claude.processObservation(from: signals)
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
                 progress.setClaudeProcessing(false)

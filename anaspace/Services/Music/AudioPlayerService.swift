@@ -36,12 +36,36 @@ final class AudioPlayerService {
     private weak var displayGrid: CharacterGrid?
     private var displayRow: Int = 0
 
+    // MARK: - Volume Diagnostics
+
+    private func logVolumeState(_ context: String) {
+        let session = AVAudioSession.sharedInstance()
+        let vol = playerNode?.volume ?? -1
+        let category = session.category.rawValue
+        let mode = session.mode.rawValue
+        let outputVol = session.outputVolume
+        let isOtherPlaying = session.isOtherAudioPlaying
+        let engineRunning = engine?.isRunning ?? false
+        let nodeIsPlaying = playerNode?.isPlaying ?? false
+        print("[AudioDiag] \(context) | vol=\(vol) sysVol=\(outputVol) cat=\(category) mode=\(mode) engineRun=\(engineRunning) nodePlay=\(nodeIsPlaying) otherAudio=\(isOtherPlaying) state=\(state)")
+    }
+
+    private func checkVolumeAnomaly(_ context: String) {
+        let vol = playerNode?.volume ?? -1
+        let session = AVAudioSession.sharedInstance()
+        // Flag if: playing but volume near zero, or session category isn't playback
+        if state == .playing && (vol < 0.05 || session.category != .playback) {
+            logVolumeState("ANOMALY \(context)")
+        }
+    }
+
     // MARK: - Public API
 
     func play() {
         guard state == .paused || (state == .idle && !queue.isEmpty) else { return }
         userPaused = false
         if state == .paused {
+            playerNode?.volume = 1.0
             playerNode?.play()
             playbackStartDate = Date.now
             state = .playing
@@ -140,6 +164,7 @@ final class AudioPlayerService {
                 guard let self else { return }
                 volume -= 0.05 / 2.0  // ~2s fade
                 if volume <= 0 {
+                    self.logVolumeState("fadeComplete-loadNewStream")
                     self.fadeTimer?.invalidate()
                     self.fadeTimer = nil
                     self.loadFromStream(stream, autoplay: autoplay)
@@ -151,6 +176,7 @@ final class AudioPlayerService {
     }
 
     func beginFadeAndPrepareForCapture() {
+        logVolumeState("beginFadeAndPrepareForCapture")
         stopEngine()
         state = .idle
         currentLevel = 0
@@ -312,6 +338,7 @@ final class AudioPlayerService {
         } else if exactRemaining <= 2.0 && exactRemaining > 0 {
             playerNode?.volume = Float(exactRemaining / 2.0)
         } else {
+            checkVolumeAnomaly("envelope-steady")
             playerNode?.volume = 1.0
         }
     }
@@ -483,6 +510,7 @@ final class AudioPlayerService {
             playerNode.play()
             playbackStartDate = Date.now
             state = .playing
+            logVolumeState("startPlayback")
             startDisplayUpdates()
         } catch {
             // Clean up and skip

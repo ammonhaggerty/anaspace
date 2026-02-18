@@ -43,7 +43,7 @@ final class CaptureRenderer: NSObject {
     private weak var progress: ObservationProgress?
     private weak var audioService: AudioService?
     private var contextYear: Int?
-    private var queryContext: QueryContext = .observation
+    private(set) var queryContext: QueryContext = .observation
 
     private var lastTranscriptText: String?
     private var cols: Int = 0
@@ -221,7 +221,7 @@ final class CaptureRenderer: NSObject {
         // Right side: countdown or Shazam indicator
         switch mode {
         case .observing:
-            let remaining = max(0, 10.0 - progress.elapsed)
+            let remaining = max(0, 12.0 - progress.elapsed)
             let mins = Int(remaining) / 60
             let secs = Int(remaining) % 60
             let timeStr = "\(mins):\(String(format: "%02d", secs))"

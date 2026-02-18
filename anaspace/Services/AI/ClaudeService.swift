@@ -82,8 +82,8 @@ final class ClaudeService: ObservationService {
       "narrative": "One sentence connecting subject, place, and year.",
       "entities": [
         {
-          "name": "ENTITY NAME",
-          "subtitle": "Optional short context (album name, venue nickname, etc.)" or null,
+          "name": "SHORT NAME (max 14 chars, 20 absolute max). ALL CAPS. Proper noun only — no locations, descriptors, or subtitles. e.g. BLACK PANTHERS not BLACK PANTHER PARTY OAKLAND HQ.",
+          "subtitle": "Optional short context" or null,
           "entityType": "collaborator|peer|influence|follower|creation|place|event|movement",
           "relationship": "Brief description of connection to subject",
           "relevance": 0.95,
@@ -95,12 +95,13 @@ final class ClaudeService: ObservationService {
 
     ## Rules
     - Return 1-10 entities. Quality over quantity.
-    - Entity names: Use the shortest recognizable title. Drop location qualifiers, \
-    descriptors, and modifiers that aren't part of the proper name. \
-    Examples: "MUSCLE SHOALS" not "MUSCLE SHOALS ALABAMA STUDIO", \
-    "BLACK PANTHERS" not "BLACK PANTHERS OAKLAND HQ", \
-    "ABBEY ROAD" not "ABBEY ROAD STUDIOS LONDON". \
-    Prefer 14 characters or fewer, 20 max. Use ALL CAPS.
+    - Entity names MUST be the shortest recognizable proper noun. HARD LIMIT: 20 characters max, \
+    target 14 or fewer. ALL CAPS. Strip everything that isn't the core name: \
+    no locations, no "HQ"/"Studios"/"Party"/"Festival", no descriptors, no subtitles. \
+    Put context in "subtitle" or "description" instead. \
+    RIGHT: "BLACK PANTHERS", "MUSCLE SHOALS", "ABBEY ROAD", "FILLMORE", "MONTEREY POP" \
+    WRONG: "BLACK PANTHER PARTY OAKLAND HQ", "MUSCLE SHOALS SOUND STUDIO", "ABBEY ROAD STUDIOS LONDON", \
+    "FILLMORE WEST VENUE", "MONTEREY POP FESTIVAL 1967"
     - Relevance: 0.0-1.0. Reserve 0.9+ for direct collaborators or defining works.
     - Bio: 400-500 characters max. Do NOT write a generic biography. Ground it in the specific year and place.
     - Entity descriptions: 400-500 characters. Explain this entity's specific connection to the subject \
@@ -112,8 +113,13 @@ final class ClaudeService: ObservationService {
     subject and entity, a song from the entity's album closest to the year, or the entity's most iconic song \
     from that era. For non-artist entities (creation, place, event, movement), set to null. \
     Use the standard song title — no "(feat. ...)" suffixes or remaster labels.
-    - Subtitles: For creation entities, subtitle is null — the name IS the title. \
-    For non-creation entities, subtitle can be a short context note (e.g. venue nickname). \
+    - Subtitles: Use null unless there's a genuinely useful distinguishing detail. \
+    For creation entities, subtitle is ALWAYS null — the name IS the title. \
+    For non-creation entities, subtitle can be a short distinguishing note (e.g. a venue's \
+    well-known nickname, a person's instrument). \
+    NEVER use generic category labels as subtitles: no "Concert Venue", "Recording Studio", \
+    "Music Festival", "Record Label", "Cultural Movement", "Nightclub", etc. The entityType \
+    already conveys the category — subtitle must add specific context or be null. \
     Never include album names alongside song names or vice versa. Pick one creation per work. \
     No format descriptors (no "Double Album", "LP", "Single", "Debut", etc.).
     - CRITICAL: You must ALWAYS return the JSON object. Never return commentary, apologies, \
@@ -193,6 +199,45 @@ final class ClaudeService: ObservationService {
         You MUST return the JSON object. Never return commentary, apologies, or explanations. \
         There is always a relevant artist — broaden your search until you find one. \
         Build the culture map around this subject, anchored to \(year) and \(location).
+        """
+        print("[Claude] Request: \(userMessage)")
+
+        let request = try buildRequest(userMessage: userMessage)
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            print("[Claude] API error \(httpResponse.statusCode): \(body)")
+            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        let text = extractResponseText(from: json)
+        print("[Claude] Response: \(text)")
+        return parseClaudeResponse(text)
+    }
+
+    /// Query Claude with a subject change — location is fixed, year flexes to most relevant era.
+    func processSubjectChange(newSubject: String, priorSubject: String, location: String) async throws -> ClaudeResult {
+        let userMessage = """
+        SUBJECT CHANGE: The user was exploring \(priorSubject) in \(location) and shifted focus to \(newSubject).
+        New subject: \(newSubject) | Location: \(location)
+
+        Location \(location) is FIXED — do not change it. \
+        The year should be the era when \(newSubject) was most culturally influential or relevant \
+        to \(location). Let the year gravitate to the peak of their impact on this place. \
+        Build the culture map around \(newSubject), showing their connections, influences, peers, \
+        and followers — with emphasis on artists and cultural figures tied to \(location). \
+        Include the prior subject \(priorSubject) as a connection if there is a genuine relationship. \
+        You MUST return the JSON object. Never return commentary, apologies, or explanations. \
+        There is always a relevant cultural map — broaden your search until you find one.
         """
         print("[Claude] Request: \(userMessage)")
 
@@ -395,7 +440,7 @@ final class ClaudeService: ObservationService {
 
         let body: [String: Any] = [
             "model": model.rawValue,
-            "max_tokens": 2048,
+            "max_tokens": 4096,
             "system": systemPrompt,
             "messages": [
                 ["role": "user", "content": userMessage]
@@ -409,6 +454,14 @@ final class ClaudeService: ObservationService {
 
     /// Extract the assistant's text from the Messages API response.
     private func extractResponseText(from json: [String: Any]) -> String {
+        // Log stop reason — "max_tokens" means truncation
+        if let stopReason = json["stop_reason"] as? String {
+            print("[Claude] stop_reason: \(stopReason)")
+            if stopReason == "max_tokens" {
+                print("[Claude] WARNING: Response was truncated (hit max_tokens limit)")
+            }
+        }
+
         guard let content = json["content"] as? [[String: Any]] else {
             print("[Claude] EXTRACT FAIL: no 'content' array in response. Keys: \(json.keys.sorted())")
             if let errorMsg = json["error"] as? [String: Any] {
@@ -451,30 +504,125 @@ final class ClaudeService: ObservationService {
             return fallbackResult(text)
         }
 
-        do {
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                print("[Claude] PARSE FAIL: JSON is not a dictionary")
-                print("[Claude] Raw text (\(text.count) chars): \(text.prefix(500))")
-                return fallbackResult(text)
-            }
-            let result = ClaudeResult(
-                subject: json["subject"] as? String ?? "Unknown",
-                subjectType: json["subjectType"] as? String ?? "unknown",
-                birthInfo: json["birthInfo"] as? String ?? "",
-                place: json["place"] as? String ?? "Unknown",
-                year: json["year"] as? Int ?? Calendar.current.component(.year, from: .now),
-                bio: json["bio"] as? String ?? "",
-                narrative: json["narrative"] as? String ?? text,
-                connections: parseEntities(json["entities"]),
-                isStreaming: false
-            )
-            print("[Claude] Parsed OK: subject=\(result.subject), place=\(result.place), year=\(result.year), entities=\(result.connections.count)")
-            return result
-        } catch {
-            print("[Claude] PARSE FAIL: \(error)")
-            print("[Claude] Cleaned text (\(cleaned.count) chars): \(cleaned.prefix(500))")
-            return fallbackResult(text)
+        // Try parsing as-is first
+        if let json = tryParseJSON(data) {
+            return buildResult(from: json, rawText: text)
         }
+
+        // Attempt to repair truncated JSON
+        print("[Claude] Initial parse failed, attempting JSON repair (\(cleaned.count) chars)")
+        if let repaired = repairTruncatedJSON(cleaned),
+           let repairedData = repaired.data(using: .utf8),
+           let json = tryParseJSON(repairedData) {
+            print("[Claude] JSON repair succeeded")
+            return buildResult(from: json, rawText: text)
+        }
+
+        print("[Claude] PARSE FAIL: JSON repair also failed")
+        print("[Claude] Cleaned text (\(cleaned.count) chars): \(cleaned.prefix(500))")
+        return fallbackResult(text)
+    }
+
+    private func tryParseJSON(_ data: Data) -> [String: Any]? {
+        try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private func buildResult(from json: [String: Any], rawText: String) -> ClaudeResult {
+        let result = ClaudeResult(
+            subject: json["subject"] as? String ?? "Unknown",
+            subjectType: json["subjectType"] as? String ?? "unknown",
+            birthInfo: json["birthInfo"] as? String ?? "",
+            place: json["place"] as? String ?? "Unknown",
+            year: json["year"] as? Int ?? Calendar.current.component(.year, from: .now),
+            bio: json["bio"] as? String ?? "",
+            narrative: json["narrative"] as? String ?? rawText,
+            connections: parseEntities(json["entities"]),
+            isStreaming: false
+        )
+        print("[Claude] Parsed OK: subject=\(result.subject), place=\(result.place), year=\(result.year), entities=\(result.connections.count)")
+        return result
+    }
+
+    /// Attempt to repair truncated JSON by closing open strings, arrays, and objects.
+    /// Uses two strategies: first tries closing at the truncation point, then falls back
+    /// to trimming the last incomplete entry.
+    private func repairTruncatedJSON(_ text: String) -> String? {
+        // Strategy 1: close at truncation point
+        if let result = attemptJSONClose(text) { return result }
+
+        // Strategy 2: drop back to the last complete entry in the innermost container
+        let trimmed = trimToLastCompleteEntry(text)
+        if trimmed != text, let result = attemptJSONClose(trimmed) { return result }
+
+        return nil
+    }
+
+    /// Close any open strings, trim trailing separators, and append missing brackets/braces.
+    private func attemptJSONClose(_ text: String) -> String? {
+        var repaired = text
+
+        // Close any open string
+        var inString = false
+        var escaped = false
+        for ch in repaired {
+            if escaped { escaped = false; continue }
+            if ch == "\\" { escaped = true; continue }
+            if ch == "\"" { inString.toggle() }
+        }
+        if inString { repaired += "\"" }
+
+        // Trim trailing comma, colon, or whitespace outside strings
+        while let last = repaired.last, ",: \t\n\r".contains(last) {
+            repaired = String(repaired.dropLast())
+        }
+
+        // Count unclosed braces/brackets
+        var braces = 0, brackets = 0
+        inString = false; escaped = false
+        for ch in repaired {
+            if escaped { escaped = false; continue }
+            if ch == "\\" { escaped = true; continue }
+            if ch == "\"" { inString.toggle(); continue }
+            guard !inString else { continue }
+            switch ch {
+            case "{": braces += 1
+            case "}": braces -= 1
+            case "[": brackets += 1
+            case "]": brackets -= 1
+            default: break
+            }
+        }
+
+        for _ in 0..<max(0, brackets) { repaired += "]" }
+        for _ in 0..<max(0, braces) { repaired += "}" }
+
+        // Verify it actually parses
+        guard let data = repaired.data(using: .utf8),
+              (try? JSONSerialization.jsonObject(with: data)) != nil else {
+            return nil
+        }
+        return repaired
+    }
+
+    /// Trim back to the last `}`, `]`, or complete value before the truncation.
+    /// This drops an incomplete entity/entry at the end.
+    private func trimToLastCompleteEntry(_ text: String) -> String {
+        // Find the last `}` or `]` that isn't inside a string
+        var lastCloseIndex: String.Index?
+        var inString = false
+        var escaped = false
+        for i in text.indices {
+            let ch = text[i]
+            if escaped { escaped = false; continue }
+            if ch == "\\" { escaped = true; continue }
+            if ch == "\"" { inString.toggle(); continue }
+            guard !inString else { continue }
+            if ch == "}" || ch == "]" {
+                lastCloseIndex = i
+            }
+        }
+        guard let idx = lastCloseIndex else { return text }
+        return String(text[...idx])
     }
 
     private func fallbackResult(_ text: String) -> ClaudeResult {
@@ -491,20 +639,30 @@ final class ClaudeService: ObservationService {
         )
     }
 
+    /// Strip content after the first newline (real or literal "\n") and trim whitespace.
+    private func firstLine(_ value: String?) -> String? {
+        guard var text = value, !text.isEmpty else { return nil }
+        // Handle literal two-character "\n" sequences (in case model emits them)
+        if let range = text.range(of: "\\n") {
+            text = String(text[..<range.lowerBound])
+        }
+        let line = text.components(separatedBy: .newlines).first?
+            .trimmingCharacters(in: .whitespaces)
+        return (line?.isEmpty == true) ? nil : line
+    }
+
     private func parseEntities(_ raw: Any?) -> [CultureConnection] {
         guard let array = raw as? [[String: Any]] else { return [] }
         return array.compactMap { item in
-            guard let name = item["name"] as? String,
+            guard let rawName = item["name"] as? String,
                   let relationship = item["relationship"] as? String else { return nil }
-            // Strip to first line only (drop format descriptors like "Double Album")
-            let subtitle = (item["subtitle"] as? String)?
-                .components(separatedBy: .newlines).first?
-                .trimmingCharacters(in: .whitespaces)
+            let name = firstLine(rawName) ?? rawName
+            let subtitle = firstLine(item["subtitle"] as? String)
             let entityType = (item["entityType"] as? String)
                 .flatMap { EntityType(rawValue: $0) } ?? .peer
             let relevance = item["relevance"] as? Double ?? 0.5
             let description = item["description"] as? String ?? ""
-            let recommendedSong = item["recommendedSong"] as? String
+            let recommendedSong = firstLine(item["recommendedSong"] as? String)
             return CultureConnection(
                 name: name,
                 subtitle: subtitle,
