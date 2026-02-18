@@ -17,12 +17,18 @@ final class MusicQueueBuilder {
     /// 2. Subject artist — album tracks near the year
     /// 3. Each artist connection — Claude's recommended song (fallback: song near year)
     /// 4. More from subject artist near the year
+    private static let artistSubjectTypes: Set<String> = [
+        "artist", "band", "poet", "composer", "dj", "producer", "singer", "rapper", "musician"
+    ]
+
     func buildQueue(
         from result: ClaudeResult,
         shazamResult: ShazamResult?,
         year: Int
     ) -> AsyncStream<TrackInfo> {
-        AsyncStream { continuation in
+        let subjectIsArtist = Self.artistSubjectTypes.contains(result.subjectType.lowercased())
+
+        return AsyncStream { continuation in
             Task { @MainActor in
                 var seen = Set<String>()
 
@@ -35,33 +41,51 @@ final class MusicQueueBuilder {
 
                 // 1. Shazam match — direct ID lookup
                 if let appleMusicID = shazamResult?.appleMusicID,
-                   let track = await music.getSongByID(appleMusicID) {
+                   let track = await self.music.getSongByID(appleMusicID) {
                     yield(track)
                 }
 
-                // 2. Subject artist — songs near the year
-                let subjectTracks = await music.searchSongs(artist: result.subject, near: year, limit: 2)
-                for track in subjectTracks {
-                    yield(track)
-                }
+                if subjectIsArtist {
+                    // 2. Subject artist — songs near the year
+                    let subjectTracks = await self.music.searchSongs(artist: result.subject, near: year, limit: 2)
+                    for track in subjectTracks {
+                        yield(track)
+                    }
 
-                // 3. Each artist connection — use Claude's recommended song
-                let artistConnections = result.connections.filter { $0.entityType.hasArtistCatalog }
-                for conn in artistConnections {
-                    if let songTitle = conn.recommendedSong,
-                       let found = await music.findSongWithAlbum(title: songTitle, artist: conn.name) {
-                        yield(found.song)
-                    } else {
-                        // Fallback: search for a song near the year
-                        let tracks = await music.searchSongs(artist: conn.name, near: year, limit: 1)
+                    // 3. Each artist connection — use Claude's recommended song
+                    let artistConnections = result.connections.filter { $0.entityType.hasArtistCatalog }
+                    for conn in artistConnections {
+                        if let songTitle = conn.recommendedSong,
+                           let found = await self.music.findSongWithAlbum(title: songTitle, artist: conn.name) {
+                            yield(found.song)
+                        } else {
+                            let tracks = await self.music.searchSongs(artist: conn.name, near: year, limit: 1)
+                            for track in tracks { yield(track) }
+                        }
+                    }
+
+                    // 4. More from subject artist
+                    let moreTracks = await self.music.searchSongs(artist: result.subject, near: year, limit: 5)
+                    for track in moreTracks {
+                        yield(track)
+                    }
+                } else {
+                    // Non-artist subject: use keyArtists for a curated playlist near the year
+                    let artists = result.keyArtists.isEmpty
+                        ? result.connections.filter { $0.entityType.hasArtistCatalog }.map(\.name)
+                        : result.keyArtists
+
+                    // First pass: 2 tracks per key artist near the year
+                    for artist in artists {
+                        let tracks = await self.music.searchSongs(artist: artist, near: year, limit: 2)
                         for track in tracks { yield(track) }
                     }
-                }
 
-                // 4. More from subject artist
-                let moreTracks = await music.searchSongs(artist: result.subject, near: year, limit: 5)
-                for track in moreTracks {
-                    yield(track)
+                    // Second pass: backfill with more from each artist
+                    for artist in artists.prefix(3) {
+                        let tracks = await self.music.searchSongs(artist: artist, near: year, limit: 3)
+                        for track in tracks { yield(track) }
+                    }
                 }
 
                 continuation.finish()

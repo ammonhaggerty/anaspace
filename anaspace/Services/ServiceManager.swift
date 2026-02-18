@@ -407,10 +407,14 @@ final class ServiceManager {
                 shazamResult: shazamResult,
                 year: result.year
             )
+            // If music is already playing, always autoplay the new queue (regardless of setting).
+            // The autoplay preference only governs cold-start behavior.
+            let isPlaying = audioPlayer.state == .playing || audioPlayer.state == .paused || audioPlayer.state == .fading
+            let shouldAutoplay = isPlaying || (appState?.autoplayEnabled ?? false)
             if transition {
-                audioPlayer.transitionToStream(stream, autoplay: appState?.autoplayEnabled ?? false)
+                audioPlayer.transitionToStream(stream, autoplay: shouldAutoplay)
             } else {
-                audioPlayer.loadFromStream(stream, autoplay: appState?.autoplayEnabled ?? false)
+                audioPlayer.loadFromStream(stream, autoplay: shouldAutoplay)
             }
         }
     }
@@ -521,13 +525,14 @@ final class ServiceManager {
 
     // MARK: - Direct Query
 
-    /// Send a direct text query to Claude (e.g. from + SUBJECT button) without audio capture.
-    func querySubjectChange(newSubject: String, priorSubject: String, location: String) {
+    /// Send a direct text query to Claude (e.g. from FOCUS button) without audio capture.
+    func querySubjectChange(connection: CultureConnection? = nil, newSubject: String, priorSubject: String, location: String, year: Int) {
         isContextChangeQuery = true
+        let savedLocation = progress.location
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
-        progress.setLocation(self.location.currentResult)
+        progress.setLocation(savedLocation ?? self.location.currentResult)
         progress.setClaudeProcessing(true)
 
         claudeTask = Task {
@@ -539,7 +544,8 @@ final class ServiceManager {
                     return
                 }
                 let result = try await claude.processSubjectChange(
-                    newSubject: newSubject, priorSubject: priorSubject, location: location
+                    connection: connection, newSubject: newSubject, priorSubject: priorSubject,
+                    location: location, year: year
                 )
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
@@ -556,10 +562,11 @@ final class ServiceManager {
     /// Query Claude with a year change — year and location are fixed, subject is flexible.
     func queryYearChange(subject: String, year: Int, location: String) {
         isContextChangeQuery = true
+        let savedLocation = progress.location
         cancelAllTasks()
         progress.reset()
         progress.transitionTo(.processing)
-        progress.setLocation(self.location.currentResult)
+        progress.setLocation(savedLocation ?? self.location.currentResult)
         progress.setClaudeProcessing(true)
 
         claudeTask = Task {

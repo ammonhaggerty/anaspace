@@ -52,7 +52,10 @@ final class ClaudeService: ObservationService {
     a "culture map" anchored to a Triad: Subject + Place + Year.
 
     ## The Triad
-    - **Subject**: Always resolves to an artist or band name (never a song or album title).
+    - **Subject**: Usually an artist or band name. However, when the user explicitly focuses on a \
+    non-artist entity (a creation, place, event, or movement), the subject IS that entity. \
+    In that case, subjectType should be the entity type (e.g. "album", "venue", "festival", "genre") \
+    and the entities should be the people, bands, works, and cultural forces that define it.
     - **Place**: A geographic location (city, region, or country).
     - **Year**: A specific year that anchors the cultural moment.
 
@@ -73,9 +76,9 @@ final class ClaudeService: ObservationService {
     ## Output Format
     Return ONLY a JSON object (no markdown fences, no commentary):
     {
-      "subject": "ARTIST NAME",
-      "subjectType": "artist|band|poet|composer|dj|producer",
-      "birthInfo": "B. YEAR, PLACE" or "EST. YEAR, PLACE" for groups,
+      "subject": "SUBJECT NAME",
+      "subjectType": "artist|band|poet|composer|dj|producer|album|song|venue|studio|festival|genre|movement|event",
+      "birthInfo": "B. YEAR, PLACE" for individuals, "EST. YEAR, PLACE" for groups, or "YEAR, PLACE" for non-artist subjects (e.g. album release year/city, venue opening year/city),
       "place": "City, State | Country",
       "year": 1978,
       "bio": "Two short paragraphs, 400-500 characters total. First paragraph: what the subject was doing in this specific year. Second paragraph: the subject's connection to this specific place.",
@@ -90,10 +93,15 @@ final class ClaudeService: ObservationService {
           "description": "400-500 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity.",
           "recommendedSong": "Song Title" or null
         }
-      ]
+      ],
+      "keyArtists": ["ARTIST 1", "ARTIST 2", "ARTIST 3", "ARTIST 4", "ARTIST 5"]
     }
 
     ## Rules
+    - keyArtists: For non-artist subjects (albums, venues, events, movements, genres), list the \
+    top 5 artists/bands most associated with this subject, ordered by relevance. These are used \
+    for music playback — the app will search each artist's catalog near the stated year. \
+    For artist subjects, set keyArtists to an empty array [].
     - Return 1-10 entities. Quality over quantity.
     - Entity names MUST be the shortest recognizable proper noun. HARD LIMIT: 20 characters max, \
     target 14 or fewer. ALL CAPS. Strip everything that isn't the core name: \
@@ -106,8 +114,11 @@ final class ClaudeService: ObservationService {
     - Bio: 400-500 characters max. Do NOT write a generic biography. Ground it in the specific year and place.
     - Entity descriptions: 400-500 characters. Explain this entity's specific connection to the subject \
     in the stated year and place. Not a generic summary of the entity.
-    - Subject: Always resolve to the primary artist/band, never a song or album title.
-    - birthInfo: Use "B. YEAR, PLACE" for individuals, "EST. YEAR, PLACE" for groups/bands.
+    - Subject: By default, resolve to the primary artist/band. Exception: when the user message \
+    explicitly states a non-artist focus (e.g. "FOCUS ON: album/venue/movement"), keep that entity \
+    as the subject and populate entities with the artists, works, and forces that define it.
+    - birthInfo: Use "B. YEAR, PLACE" for individuals, "EST. YEAR, PLACE" for groups/bands, \
+    or "YEAR, PLACE" for non-artist subjects (release year, opening year, founding year, etc.).
     - recommendedSong: For artist entities (collaborator, peer, influence, follower), pick the one song \
     that best represents this connection to the subject in the stated year. Prefer: a collaboration between \
     subject and entity, a song from the entity's album closest to the year, or the entity's most iconic song \
@@ -225,16 +236,50 @@ final class ClaudeService: ObservationService {
     }
 
     /// Query Claude with a subject change — location is fixed, year flexes to most relevant era.
-    func processSubjectChange(newSubject: String, priorSubject: String, location: String) async throws -> ClaudeResult {
+    func processSubjectChange(connection: CultureConnection? = nil, newSubject: String, priorSubject: String, location: String, year: Int) async throws -> ClaudeResult {
+        // Build entity context string for non-artist entities
+        let entityContext: String
+        if let conn = connection, !conn.entityType.hasArtistCatalog {
+            var parts = ["\(newSubject) is a \(conn.entityType.rawValue)"]
+            if let subtitle = conn.subtitle { parts.append("(\(subtitle))") }
+            parts.append("connected to \(priorSubject) in \(location) circa \(year)")
+            parts.append("— \(conn.relationship)")
+            parts.append("Context: \(conn.description)")
+            entityContext = parts.joined(separator: " ")
+        } else {
+            entityContext = "\(newSubject) (artist/band)"
+        }
+
+        let isArtist = connection?.entityType.hasArtistCatalog ?? true
+        let entityType = connection?.entityType.rawValue ?? "entity"
+        let subjectGuidance: String
+        if isArtist {
+            subjectGuidance = """
+            Build the culture map around \(newSubject), showing their connections, influences, peers, \
+            and followers — with emphasis on artists and cultural figures tied to \(location).
+            """
+        } else {
+            subjectGuidance = """
+            FOCUS ON NON-ARTIST ENTITY: \(newSubject) is a \(entityType). Keep \(newSubject) as the \
+            subject — do NOT resolve it to an artist. Set subjectType to "\(entityType)". \
+            The entities should be the people, bands, songs, movements, places, and cultural forces \
+            that define \(newSubject). Prioritize artist entities (collaborators, peers, influences) so \
+            the culture map is rich with musicians — these are the people who made \(newSubject) what it is. \
+            Include the prior subject \(priorSubject) as a high-relevance connection. \
+            For recommendedSong on artist entities: pick the song that best connects that artist to \(newSubject). \
+            The bio should describe what \(newSubject) is, its significance in \(location), and why it matters \
+            in the context of the stated year.
+            """
+        }
+
         let userMessage = """
-        SUBJECT CHANGE: The user was exploring \(priorSubject) in \(location) and shifted focus to \(newSubject).
-        New subject: \(newSubject) | Location: \(location)
+        SUBJECT CHANGE: The user was exploring \(priorSubject) in \(location) (\(year)) and shifted focus to: \(entityContext).
+        Location: \(location) | Prior year: \(year)
 
         Location \(location) is FIXED — do not change it. \
-        The year should be the era when \(newSubject) was most culturally influential or relevant \
+        \(subjectGuidance) \
+        The year should be the era when this subject was most culturally influential or relevant \
         to \(location). Let the year gravitate to the peak of their impact on this place. \
-        Build the culture map around \(newSubject), showing their connections, influences, peers, \
-        and followers — with emphasis on artists and cultural figures tied to \(location). \
         Include the prior subject \(priorSubject) as a connection if there is a genuine relationship. \
         You MUST return the JSON object. Never return commentary, apologies, or explanations. \
         There is always a relevant cultural map — broaden your search until you find one.
@@ -537,6 +582,7 @@ final class ClaudeService: ObservationService {
             bio: json["bio"] as? String ?? "",
             narrative: json["narrative"] as? String ?? rawText,
             connections: parseEntities(json["entities"]),
+            keyArtists: (json["keyArtists"] as? [String]) ?? [],
             isStreaming: false
         )
         print("[Claude] Parsed OK: subject=\(result.subject), place=\(result.place), year=\(result.year), entities=\(result.connections.count)")
@@ -635,6 +681,7 @@ final class ClaudeService: ObservationService {
             bio: "",
             narrative: text,
             connections: [],
+            keyArtists: [],
             isStreaming: false
         )
     }

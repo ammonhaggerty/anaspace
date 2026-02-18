@@ -845,6 +845,9 @@ struct ContentView: View {
     private func makeEntitySubject() {
         guard let info = infoRenderer, info.mode == .entity else { return }
         contextChangeSnapshot = createContextSnapshot()
+
+        // Find the matching connection for full entity context
+        let connection = homeRenderer?.connections.first { $0.name == info.entityName }
         let entityName = info.entityName
         let priorSubject = homeRenderer?.graphSubject.label ?? ""
         let location = homeRenderer?.locationLabel ?? ""
@@ -853,7 +856,13 @@ struct ContentView: View {
         navManager.resetToHome()
 
         // Go directly into capture/analysis from the current page
-        serviceManager.querySubjectChange(newSubject: entityName, priorSubject: priorSubject, location: location)
+        serviceManager.querySubjectChange(
+            connection: connection,
+            newSubject: entityName,
+            priorSubject: priorSubject,
+            location: location,
+            year: selectedYear
+        )
         controller.enterCapture(
             mode: .observing,
             progress: serviceManager.progress,

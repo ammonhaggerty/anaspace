@@ -49,8 +49,6 @@ final class CaptureRenderer: NSObject {
     private var cols: Int = 0
 
     // Shazam indicator state
-    private var indicatorToggle = false
-    private var lastIndicatorToggle: CFTimeInterval = 0
 
     // Signal carousel state
     private var signals: [SignalItem] = []
@@ -72,8 +70,6 @@ final class CaptureRenderer: NSObject {
         self.audioService = audioService
         self.cols = GridMetrics.columns
         self.lastTranscriptText = nil
-        self.indicatorToggle = false
-        self.lastIndicatorToggle = 0
         self.contextYear = contextYear
         self.queryContext = queryContext
         self.signals = []
@@ -232,10 +228,7 @@ final class CaptureRenderer: NSObject {
                 row0[col] = CellState(character: ch, color: .bold, bold: false)
             }
 
-        case .listening:
-            renderShazamIndicator(into: &row0, progress: progress, elapsed: elapsed)
-
-        case .evaluating:
+        case .listening, .evaluating:
             break
         }
 
@@ -254,16 +247,6 @@ final class CaptureRenderer: NSObject {
             let col = labelStart + i
             guard col < cols else { break }
             row0[col] = CellState(character: ch, color: .bold, bold: false)
-        }
-
-        // ID status: right-aligned
-        let hasMatch = progress.shazamResult != nil
-        let indicator = hasMatch ? "ID\u{2713}" : "ID\u{00D7}"
-        let indStart = cols - indicator.count
-        for (i, ch) in indicator.enumerated() {
-            let col = indStart + i
-            guard col >= 0, col < cols else { continue }
-            row0[col] = CellState(character: ch, color: hasMatch ? .bold : .bold, bold: false)
         }
 
         grid.setRow(layer: .content, row: 0, states: row0)
@@ -334,28 +317,6 @@ final class CaptureRenderer: NSObject {
         }
 
         grid.setRow(layer: .content, row: 2, states: row2)
-    }
-
-    // MARK: - Shazam Indicator
-
-    private func renderShazamIndicator(into row: inout [CellState], progress: ObservationProgress, elapsed: CFTimeInterval) {
-        let indicator: String
-        if progress.shazamResult != nil {
-            indicator = "ID\u{2713}"
-        } else {
-            if elapsed - lastIndicatorToggle >= 0.25 {
-                indicatorToggle.toggle()
-                lastIndicatorToggle = elapsed
-            }
-            indicator = indicatorToggle ? "ID\u{25C9}" : "ID\u{25CB}"
-        }
-        let indStart = cols - indicator.count
-        for (i, ch) in indicator.enumerated() {
-            let col = indStart + i
-            guard col >= 0, col < cols else { continue }
-            let color: GridColor = progress.shazamResult != nil ? .focus : .bold
-            row[col] = CellState(character: ch, color: color, bold: false)
-        }
     }
 
     // MARK: - Transcript (Row 3+)

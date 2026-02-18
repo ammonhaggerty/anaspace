@@ -174,7 +174,35 @@ struct ClaudeResult: Codable, Sendable {
     let bio: String
     let narrative: String
     let connections: [CultureConnection]
+    let keyArtists: [String]
     let isStreaming: Bool
+
+    init(subject: String, subjectType: String, birthInfo: String, place: String, year: Int, bio: String, narrative: String, connections: [CultureConnection], keyArtists: [String] = [], isStreaming: Bool) {
+        self.subject = subject
+        self.subjectType = subjectType
+        self.birthInfo = birthInfo
+        self.place = place
+        self.year = year
+        self.bio = bio
+        self.narrative = narrative
+        self.connections = connections
+        self.keyArtists = keyArtists
+        self.isStreaming = isStreaming
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        subject = try c.decode(String.self, forKey: .subject)
+        subjectType = try c.decode(String.self, forKey: .subjectType)
+        birthInfo = try c.decode(String.self, forKey: .birthInfo)
+        place = try c.decode(String.self, forKey: .place)
+        year = try c.decode(Int.self, forKey: .year)
+        bio = try c.decode(String.self, forKey: .bio)
+        narrative = try c.decode(String.self, forKey: .narrative)
+        connections = try c.decode([CultureConnection].self, forKey: .connections)
+        keyArtists = try c.decodeIfPresent([String].self, forKey: .keyArtists) ?? []
+        isStreaming = try c.decode(Bool.self, forKey: .isStreaming)
+    }
 }
 
 // MARK: - Service Configuration
