@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var selectedCoordinate = CLLocationCoordinate2D(latitude: 37.8044, longitude: -122.2712)
     @State private var serviceManager = ServiceManager()
     @State private var onboardingRenderer = OnboardingRenderer()
+    @State private var isOnboardingTransitioning = false
     @State private var historyStore = HistoryStore()
     @State private var activeHistoryEntryId: UUID?
     @State private var usedCircaYears: Set<Int> = []
@@ -69,7 +70,7 @@ struct ContentView: View {
                     }
 
                     // Transition cover — blocks components from showing through grid kern gaps
-                    if navManager.isTransitioning {
+                    if navManager.isTransitioning || isOnboardingTransitioning {
                         GridColor.background.uiColor.swiftUI
                     }
 
@@ -88,7 +89,15 @@ struct ContentView: View {
                         Color.clear
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                handleOnboardingTap()
+                                Task {
+                                    // Show pressed state
+                                    if let grid = controller.grid {
+                                        onboardingRenderer.renderButtonPressed(into: grid)
+                                        grid.render()
+                                        try? await Task.sleep(for: .milliseconds(300))
+                                    }
+                                    handleOnboardingTap()
+                                }
                             }
                     }
                 }
@@ -422,7 +431,7 @@ struct ContentView: View {
                             if navManager.currentPage == .info,
                                infoRenderer?.mode == .entity {
                                 NavTextButton(
-                                    label: "+ SUBJECT",
+                                    label: "FOCUS",
                                     fg: GridColor.tint.uiColor.swiftUI,
                                     bg: GridColor.bold.uiColor.swiftUI
                                 ) {
@@ -446,13 +455,15 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Re-check permissions when returning from Settings
-            if !appState.hasCompletedOnboarding && onboardingRenderer.isMicDenied {
+            if !appState.hasCompletedOnboarding && onboardingRenderer.currentStep == .microphone {
                 Task {
                     await serviceManager.refreshPermissions()
                     if serviceManager.permissions.microphone == .granted {
                         advanceOnboarding()
-                    } else {
-                        refreshOnboardingGrid()
+                    } else if let grid = controller.grid {
+                        grid.clearLayer(.content)
+                        onboardingRenderer.renderContent(into: grid)
+                        grid.render()
                     }
                 }
             }
@@ -572,9 +583,7 @@ struct ContentView: View {
             serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
             serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
         } else {
-            // Content first — computes hiddenStructureRows for buttons
             onboardingRenderer.renderContent(into: grid)
-            onboardingRenderer.renderStructure(into: grid)
         }
         grid.render()
 
@@ -813,30 +822,17 @@ struct ContentView: View {
 
     @ViewBuilder
     private func onboardingComponentLayer(metrics: GridMetrics) -> some View {
-        let step = onboardingRenderer.currentStep
-
-        // CONTINUE / BEGIN button (shown on all steps except mic-denied)
-        if onboardingRenderer.continueButtonRow > 0 {
-            let label = step == .tips ? "BEGIN" : "CONTINUE"
-            GridButton(label: label, metrics: metrics) {
-                handleOnboardingTap()
-            }
-            .gridAligned(row: onboardingRenderer.continueButtonRow, col: centeredButtonCol(label), metrics: metrics)
+        if onboardingRenderer.currentStep == .welcome {
+            let logoHeight = CGFloat(6) * metrics.lineHeight * 0.825
+            Image("anaspace-onboarding-logo")
+                .resizable()
+                .scaledToFit()
+                .frame(height: logoHeight)
+                .frame(maxWidth: .infinity)
+                .offset(
+                    y: GridMetrics.topPadding + CGFloat(onboardingRenderer.logoRow) * metrics.lineHeight + 150
+                )
         }
-
-        // OPEN SETTINGS button (mic denied only)
-        if onboardingRenderer.settingsButtonRow > 0 {
-            GridButton(label: "OPEN SETTINGS", metrics: metrics) {
-                openSettings()
-            }
-            .gridAligned(row: onboardingRenderer.settingsButtonRow, col: centeredButtonCol("OPEN SETTINGS"), metrics: metrics)
-        }
-    }
-
-    /// Center a GridButton (label + 2 end-cap cols) within the 33-col grid.
-    private func centeredButtonCol(_ label: String) -> Int {
-        let buttonCols = label.count + 2
-        return max(0, (GridMetrics.columns - buttonCols) / 2)
     }
 
     // MARK: - Onboarding Navigation
@@ -846,13 +842,20 @@ struct ContentView: View {
         case .welcome:
             advanceOnboarding()
         case .microphone:
-            if onboardingRenderer.isMicDenied { return }
+            if onboardingRenderer.isMicDenied {
+                openSettings()
+                return
+            }
             Task {
                 await serviceManager.permissions.requestMicrophone()
                 if serviceManager.permissions.microphone == .granted {
                     advanceOnboarding()
                 } else {
-                    refreshOnboardingGrid()
+                    // Re-render to show mic-denied state
+                    guard let grid = controller.grid else { return }
+                    grid.clearLayer(.content)
+                    onboardingRenderer.renderContent(into: grid)
+                    grid.render()
                 }
             }
         case .location:
@@ -863,80 +866,72 @@ struct ContentView: View {
         case .speech:
             Task {
                 await serviceManager.permissions.requestSpeechRecognition()
-                advanceOnboarding()
+                completeOnboarding()
             }
-        case .tips:
-            completeOnboarding()
         }
     }
 
     private func advanceOnboarding() {
         guard let grid = controller.grid else { return }
-        controller.cascade.run(on: grid) { [self] in
-            let nextStep: OnboardingStep? = switch onboardingRenderer.currentStep {
+        isOnboardingTransitioning = true
+        controller.wipe.wipeOut(on: grid) { [self] in
+            // Advance to next step, skipping already-granted permissions
+            var next: OnboardingStep? = switch onboardingRenderer.currentStep {
             case .welcome: .microphone
             case .microphone: .location
             case .location: .speech
-            case .speech: .tips
-            case .tips: nil
+            case .speech: nil
             }
-            guard let next = nextStep else { return }
-            onboardingRenderer.currentStep = next
 
-            // Skip permission steps that are already granted
-            if onboardingRenderer.shouldSkipCurrentStep {
-                skipToNextStep(grid: grid)
+            // Skip granted permissions in a loop
+            while let candidate = next, onboardingRenderer.currentStep != candidate {
+                onboardingRenderer.currentStep = candidate
+                if onboardingRenderer.shouldSkipCurrentStep {
+                    next = switch candidate {
+                    case .welcome: .microphone
+                    case .microphone: .location
+                    case .location: .speech
+                    case .speech: nil
+                    }
+                } else {
+                    break
+                }
+            }
+
+            // If all remaining permissions granted, complete onboarding
+            if next == nil {
+                appState.hasCompletedOnboarding = true
+                grid.clearLayer(.content)
+                grid.clearLayer(.structure)
+                populateGrid(grid)
+                controller.wipe.wipeIn(on: grid) { [self] in
+                    isOnboardingTransitioning = false
+                }
                 return
             }
 
-            renderOnboardingStep(grid: grid)
+            grid.clearLayer(.content)
+            grid.clearLayer(.structure)
+            onboardingRenderer.renderContent(into: grid)
+            grid.render()
+            controller.wipe.wipeIn(on: grid) { [self] in
+                isOnboardingTransitioning = false
+            }
         }
-    }
-
-    /// Recursively skip already-granted permission steps.
-    private func skipToNextStep(grid: CharacterGrid) {
-        let nextStep: OnboardingStep? = switch onboardingRenderer.currentStep {
-        case .welcome: .microphone
-        case .microphone: .location
-        case .location: .speech
-        case .speech: .tips
-        case .tips: nil
-        }
-        guard let next = nextStep else {
-            // All permissions already granted — go to tips
-            onboardingRenderer.currentStep = .tips
-            renderOnboardingStep(grid: grid)
-            return
-        }
-        onboardingRenderer.currentStep = next
-        if onboardingRenderer.shouldSkipCurrentStep {
-            skipToNextStep(grid: grid)
-        } else {
-            renderOnboardingStep(grid: grid)
-        }
-    }
-
-    private func renderOnboardingStep(grid: CharacterGrid) {
-        grid.clearLayer(.structure)
-        grid.clearLayer(.content)
-        onboardingRenderer.renderContent(into: grid)
-        onboardingRenderer.renderStructure(into: grid)
-        grid.render()
     }
 
     private func completeOnboarding() {
         guard let grid = controller.grid else { return }
-        controller.cascade.run(on: grid) { [self] in
+        isOnboardingTransitioning = true
+        controller.wipe.wipeOut(on: grid) { [self] in
             appState.hasCompletedOnboarding = true
-            grid.clearLayer(.structure)
             grid.clearLayer(.content)
+            grid.clearLayer(.structure)
             populateGrid(grid)
+            controller.wipe.wipeIn(on: grid) { [self] in
+                isOnboardingTransitioning = false
+            }
         }
-    }
-
-    private func refreshOnboardingGrid() {
-        guard let grid = controller.grid else { return }
-        renderOnboardingStep(grid: grid)
     }
 
     private func openSettings() {

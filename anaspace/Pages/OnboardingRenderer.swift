@@ -5,7 +5,6 @@ enum OnboardingStep {
     case microphone
     case location
     case speech
-    case tips
 }
 
 @Observable @MainActor
@@ -14,12 +13,11 @@ final class OnboardingRenderer {
     var currentStep: OnboardingStep = .welcome
     var permissions: PermissionManager?
 
-    // Button row tracking for component layer
-    private(set) var continueButtonRow: Int = 0
-    private(set) var settingsButtonRow: Int = -1
+    // Button region for pressed-state rendering (row, col, width, height)
+    private(set) var buttonRegion: (row: Int, col: Int, width: Int, height: Int) = (0, 0, 0, 0)
 
-    // Rows where structure should be hidden (around buttons)
-    private(set) var hiddenStructureRows: Set<Int> = []
+    // Logo row for component layer positioning
+    private(set) var logoRow: Int = 0
 
     private let cols = GridMetrics.columns
     private let contentWidth = 31
@@ -43,224 +41,162 @@ final class OnboardingRenderer {
     // MARK: - Structure
 
     func renderStructure(into grid: CharacterGrid) {
-        for row in 0..<grid.rowCount {
-            guard !hiddenStructureRows.contains(row) else { continue }
-            for col in 0..<cols {
-                grid.setCell(
-                    layer: .structure, row: row, col: col,
-                    state: CellState(character: "\u{2591}", color: .tint, bold: false)
-                )
-            }
-        }
+        // No background structure in redesigned onboarding
     }
 
     // MARK: - Content
 
     func renderContent(into grid: CharacterGrid) {
-        hiddenStructureRows = []
-        settingsButtonRow = -1
         switch currentStep {
         case .welcome:
             renderWelcome(into: grid)
         case .microphone:
-            renderMicrophone(into: grid)
+            if isMicDenied {
+                renderMicDenied(into: grid)
+            } else {
+                renderPermission(into: grid, glyph: "\u{25C9}", header: "MICROPHONE ACCESS",
+                                 subtitle: "TO OBSERVE\nANASPACE NEEDS TO LISTEN", buttonLabel: "READY")
+            }
         case .location:
-            renderLocation(into: grid)
+            renderPermission(into: grid, glyph: "\u{2207}", header: "LOCATION ACCESS",
+                             subtitle: "EVERY SOUND HAS A PLACE", buttonLabel: "READY")
         case .speech:
-            renderSpeech(into: grid)
-        case .tips:
-            renderTips(into: grid)
+            renderPermission(into: grid, glyph: "\u{238A}", header: "SPEECH ACCESS",
+                             subtitle: "YOUR VOICE IS A COMPASS TOO", buttonLabel: "READY")
         }
     }
 
     // MARK: - Welcome Screen
 
     private func renderWelcome(into grid: CharacterGrid) {
-        let logoLines: [String] = [
-            "        \u{250F}\u{2513}\u{2533}\u{2513}\u{250F}\u{2513}\u{250F}\u{2513}\u{250F}\u{2513}\u{250F}\u{2513}\u{250F}\u{2513}\u{250F}\u{2513}",
-            "        \u{2523}\u{252B}\u{2503}\u{2503}\u{2523}\u{252B}\u{2517}\u{2513}\u{2503}\u{2503}\u{2523}\u{252B}\u{2503} \u{2523} ",
-            "       \u{257C}\u{251B}\u{2517}\u{251B}\u{2517}\u{251B}\u{2517}\u{2517}\u{251B}\u{2523}\u{251B}\u{251B}\u{2517}\u{2517}\u{251B}\u{2517}\u{251B}",
-        ]
+        let rowCount = grid.rowCount
+        let titleRow = rowCount / 3
+        let subtitleRow = rowCount * 11 / 20
+        let buttonRow = rowCount - rowCount / 6
 
-        var row = 1
+        // Logo positioning for component layer
+        logoRow = max(1, titleRow - 8)
 
-        for line in logoLines {
+        // "LISTEN TO WHERE YOU ARE" centered at subtitleRow
+        renderCenteredLine("LISTEN TO WHERE YOU ARE", into: grid, row: subtitleRow, color: .bold, bold: false)
+
+        // "FOR THE LOVE OF MUSIC / COSTS NOTHING / COLLECTS NOTHING" centered between subtitle and button
+        let taglineRow = subtitleRow + (buttonRow - subtitleRow) / 2 - 1
+        let taglineLines = ["FOR THE LOVE OF MUSIC", "COSTS NOTHING", "COLLECTS NOTHING"]
+        var row = taglineRow
+        for line in taglineLines {
             guard row < grid.rowCount else { break }
-            for (i, ch) in line.enumerated() {
-                guard i < cols else { break }
-                guard ch != " " else { continue }
-                grid.setCell(
-                    layer: .content, row: row, col: i,
-                    state: CellState(character: ch, color: .bold, bold: true)
-                )
-            }
+            renderCenteredLine(line, into: grid, row: row, color: .bold, bold: true, small: true)
             row += 1
         }
 
+        // [BEGIN] button
+        renderButton(into: grid, row: buttonRow, label: "BEGIN")
+    }
+
+    // MARK: - Permission Screens
+
+    private func renderPermission(into grid: CharacterGrid, glyph: Character, header: String,
+                                  subtitle: String, buttonLabel: String) {
+        let rowCount = grid.rowCount
+        let titleRow = rowCount / 3
+        let subtitleRow = rowCount * 11 / 20
+        let buttonRow = rowCount - rowCount / 6
+
+        // Glyph centered at titleRow - 1
+        let glyphRow = titleRow - 1
         grid.setCell(
-            layer: .content, row: row, col: cols / 2,
-            state: CellState(character: "\u{25CF}", color: .focus, bold: false)
-        )
-        row += 1
-
-        row += 1 // spacer
-
-        row = renderCenteredParagraph("A CULTURAL EXPLORATION ENGINE", into: grid, row: row)
-
-        row += 1 // spacer
-
-        row = renderCenteredHeader("YOUR DATA IS YOURS", into: grid, row: row)
-        row = renderCenteredParagraph(
-            "Everything lives on your device. No data collection. No accounts. No tracking. Your discoveries belong to you.",
-            into: grid, row: row
+            layer: .content, row: glyphRow, col: cols / 2,
+            state: CellState(character: glyph, color: .bold, bold: true)
         )
 
-        row += 2
-        markButtonRows(row)
-        continueButtonRow = row
-    }
+        // Header at titleRow
+        renderCenteredLine(header, into: grid, row: titleRow, color: .bold, bold: true)
 
-    // MARK: - Microphone Screen (Required)
-
-    private func renderMicrophone(into grid: CharacterGrid) {
-        var row = 1
-
-        if permissions?.microphone == .denied {
-            // Denied state
-            row = renderCenteredHeader("MICROPHONE REQUIRED", into: grid, row: row)
+        // Subtitle at subtitleRow (may be multi-line with \n)
+        let subtitleLines = subtitle.split(separator: "\n").map(String.init)
+        var row = subtitleRow
+        for line in subtitleLines {
+            guard row < grid.rowCount else { break }
+            renderCenteredLine(line, into: grid, row: row, color: .bold, bold: false)
             row += 1
-            row = renderCenteredParagraph(
-                "Microphone access was denied. Open Settings to enable microphone access for Anaspace.",
-                into: grid, row: row
-            )
-
-            row += 2
-            markButtonRows(row)
-            settingsButtonRow = row
-            continueButtonRow = -1
-        } else {
-            // Pre-read state
-            row = renderCenteredHeader("MICROPHONE", into: grid, row: row)
-            row += 1
-            row = renderCenteredParagraph(
-                "The core experience uses the microphone to identify music and classify the sound around you.",
-                into: grid, row: row
-            )
-            row += 1
-            row = renderCenteredParagraph(
-                "You will be asked to give permission.",
-                into: grid, row: row
-            )
-
-            row += 2
-            markButtonRows(row)
-            continueButtonRow = row
         }
+
+        // [READY] button
+        renderButton(into: grid, row: buttonRow, label: buttonLabel)
     }
 
-    // MARK: - Location Screen (Recommended)
+    // MARK: - Mic Denied
 
-    private func renderLocation(into grid: CharacterGrid) {
-        var row = 1
+    private func renderMicDenied(into grid: CharacterGrid) {
+        let rowCount = grid.rowCount
+        let titleRow = rowCount / 3
+        let subtitleRow = rowCount * 11 / 20
+        let buttonRow = rowCount - rowCount / 6
 
-        row = renderCenteredHeader("LOCATION", into: grid, row: row)
-        row += 1
-        row = renderCenteredParagraph(
-            "Location anchors your discoveries to place, connecting what you hear to where you are.",
-            into: grid, row: row
-        )
-        row += 1
-        row = renderCenteredParagraph(
-            "You will be asked to share your location.",
-            into: grid, row: row
+        // Glyph
+        let glyphRow = titleRow - 1
+        grid.setCell(
+            layer: .content, row: glyphRow, col: cols / 2,
+            state: CellState(character: "\u{25C9}", color: .bold, bold: true)
         )
 
-        row += 2
-        markButtonRows(row)
-        continueButtonRow = row
+        // Header
+        renderCenteredLine("MICROPHONE REQUIRED", into: grid, row: titleRow, color: .bold, bold: true)
+
+        // Subtitle
+        renderCenteredLine("OPEN SETTINGS TO ENABLE", into: grid, row: subtitleRow, color: .bold, bold: false)
+
+        // [SETTINGS] button
+        renderButton(into: grid, row: buttonRow, label: "SETTINGS")
     }
 
-    // MARK: - Speech Screen (Optional)
+    // MARK: - Button Rendering
 
-    private func renderSpeech(into grid: CharacterGrid) {
-        var row = 1
-
-        row = renderCenteredHeader("SPEECH", into: grid, row: row)
-        row += 1
-        row = renderCenteredParagraph(
-            "Speech recognition powers walkie-talkie mode. Press and hold to speak a command, name an artist, or describe a moment.",
-            into: grid, row: row
+    private func renderButton(into grid: CharacterGrid, row: Int, label: String) {
+        let buttonWidth = label.count + 4
+        let buttonCol = max(0, (cols - buttonWidth) / 2)
+        let size = BracketButton.render(
+            into: grid, row: row, col: buttonCol,
+            lines: [label], pressed: false
         )
-        row += 1
-        row = renderCenteredParagraph(
-            "You will be asked to enable speech recognition.",
-            into: grid, row: row
-        )
-
-        row += 2
-        markButtonRows(row)
-        continueButtonRow = row
+        buttonRegion = (row: row, col: buttonCol, width: size.width, height: size.height)
     }
 
-    // MARK: - Tips Screen
+    /// Re-render the button in pressed state (double-line borders).
+    func renderButtonPressed(into grid: CharacterGrid) {
+        let region = buttonRegion
+        guard region.width > 0 else { return }
 
-    private func renderTips(into grid: CharacterGrid) {
-        var row = 1
+        // Determine the label from the current step
+        let label: String
+        switch currentStep {
+        case .welcome: label = "BEGIN"
+        case .microphone:
+            label = isMicDenied ? "SETTINGS" : "READY"
+        case .location: label = "READY"
+        case .speech: label = "READY"
+        }
 
-        row = renderCenteredHeader("HOW IT WORKS", into: grid, row: row)
-        row += 1
-        row = renderCenteredHeader("TAP", into: grid, row: row)
-        row = renderCenteredParagraph(
-            "Listen to the world. Identifies music, classifies sound, captures location. Resolves automatically on match or timeout.",
-            into: grid, row: row
+        BracketButton.render(
+            into: grid, row: region.row, col: region.col,
+            lines: [label], pressed: true
         )
-        row += 1
-        row = renderCenteredHeader("PRESS & HOLD", into: grid, row: row)
-        row = renderCenteredParagraph(
-            "Walkie-talkie mode. Speak a command, name an artist, describe a moment. Release when done.",
-            into: grid, row: row
-        )
-
-        row += 2
-        markButtonRows(row)
-        continueButtonRow = row
     }
 
-    // MARK: - Centered Rendering Helpers
+    // MARK: - Rendering Helpers
 
-    private func renderCenteredHeader(_ text: String, into grid: CharacterGrid, row: Int) -> Int {
-        guard row < grid.rowCount else { return row }
+    private func renderCenteredLine(_ text: String, into grid: CharacterGrid, row: Int,
+                                    color: GridColor, bold: Bool, small: Bool = false) {
+        guard row < grid.rowCount else { return }
         let uppercased = text.uppercased()
         let startCol = max(0, (cols - uppercased.count) / 2)
         for (i, ch) in uppercased.enumerated() {
             guard startCol + i < cols else { break }
             grid.setCell(
                 layer: .content, row: row, col: startCol + i,
-                state: CellState(character: ch, color: .bold, bold: true)
+                state: CellState(character: ch, color: color, bold: bold, small: small)
             )
         }
-        return row + 1
-    }
-
-    private func renderCenteredParagraph(_ text: String, into grid: CharacterGrid, row: Int) -> Int {
-        let lines = TextWrapper.wrap(text, maxWidth: contentWidth)
-        var currentRow = row
-        for line in lines {
-            guard currentRow < grid.rowCount else { break }
-            let startCol = max(0, (cols - line.count) / 2)
-            for (i, ch) in line.enumerated() {
-                guard startCol + i < cols else { break }
-                grid.setCell(
-                    layer: .content, row: currentRow, col: startCol + i,
-                    state: CellState(character: ch, color: .bold, bold: false)
-                )
-            }
-            currentRow += 1
-        }
-        return currentRow
-    }
-
-    private func markButtonRows(_ buttonRow: Int) {
-        hiddenStructureRows.formUnion([buttonRow - 1, buttonRow, buttonRow + 1])
     }
 }
