@@ -410,9 +410,9 @@ struct ContentView: View {
                     switch footerState {
                     case .hidden:
                         Spacer()
-                    case .homeIdle:
+                    case .homeIdle, .homeObserving:
                         BottomNavBar(
-                            isObserving: false,
+                            isObserving: controller.isCapturing,
                             onObserveTap: {
                                 guard serviceManager.progress.phase == .idle || serviceManager.progress.phase == .resolved else { return }
                                 activeHistoryEntryId = nil
@@ -433,21 +433,6 @@ struct ContentView: View {
                             onOptionsTap: {
                                 navigateTo(.options)
                             },
-                            onHoldStart: {
-                                Task { await serviceManager.upgradeToHold() }
-                                controller.upgradeCaptureToHold()
-                            },
-                            onHoldEnd: {
-                                Task {
-                                    try? await Task.sleep(for: .milliseconds(500))
-                                    serviceManager.endCapture()
-                                }
-                            }
-                        )
-                    case .homeObserving:
-                        BottomNavBar(
-                            isObserving: true,
-                            onObserveTap: {},
                             onHoldStart: {
                                 Task { await serviceManager.upgradeToHold() }
                                 controller.upgradeCaptureToHold()
@@ -734,6 +719,11 @@ struct ContentView: View {
             }
         }
 
+        // Sync active triad to ServiceManager so observations respect current context
+        serviceManager.activeSubject = home.graphSubject.label
+        serviceManager.activeYear = selectedYear
+        serviceManager.activeLocationLabel = home.locationLabel
+
         // Save to history only on final resolution (not streaming updates)
         if saveToHistory {
             if let activeId = activeHistoryEntryId {
@@ -794,7 +784,13 @@ struct ContentView: View {
         refreshCircaYear()
 
         guard let targetRenderer = renderers[.home] else { return }
-        navManager.navigateToHome(using: controller, renderer: targetRenderer)
+        navManager.navigateToHome(using: controller, renderer: targetRenderer) {
+            guard let grid = controller.grid else { return }
+            serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
+            serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
+            grid.render()
+            controller.startIdlePulse()
+        }
     }
 
     private func goBack() {
@@ -805,7 +801,17 @@ struct ContentView: View {
 
         let previousPage = navManager.pageStack.last ?? .home
         guard let targetRenderer = renderers[previousPage] else { return }
-        navManager.goBack(using: controller, renderer: targetRenderer)
+        navManager.goBack(using: controller, renderer: targetRenderer) {
+            guard let grid = controller.grid else { return }
+            serviceManager.audioPlayer.setDisplayTarget(grid: grid, row: grid.rowCount - 1)
+            serviceManager.audioPlayer.renderPlayerRow(into: grid, at: grid.rowCount - 1)
+            grid.render()
+            if previousPage == .home,
+               homeRenderer?.hasObservations == false,
+               homeRenderer?.showNothingObserved != true {
+                controller.startIdlePulse()
+            }
+        }
     }
 
     private func restoreFromHistory(_ entry: HistoryEntry) {
@@ -899,10 +905,12 @@ struct ContentView: View {
         guard let home = homeRenderer, home.hasObservations else { return }
         contextChangeSnapshot = createContextSnapshot()
         let subject = home.graphSubject.label
+        let subjectType = serviceManager.progress.latestResult?.subjectType ?? "artist"
 
         // Location change: subject + year are fixed, location is new
         serviceManager.queryLocationChange(
             subject: subject,
+            subjectType: subjectType,
             year: selectedYear,
             location: newLocation,
             locationResult: locationResult

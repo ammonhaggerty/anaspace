@@ -26,11 +26,11 @@ final class NavigationManager {
         }
     }
 
-    func goBack(using controller: GridController, renderer: PageRenderer) {
+    func goBack(using controller: GridController, renderer: PageRenderer, onComplete: (() -> Void)? = nil) {
         guard !isTransitioning, let previousPage = pageStack.popLast() else { return }
         isTransitioning = true
 
-        performWipeTransition(using: controller, renderer: renderer) { [weak self] in
+        performWipeTransition(using: controller, renderer: renderer, onComplete: onComplete) { [weak self] in
             self?.currentPage = previousPage
         }
     }
@@ -42,12 +42,12 @@ final class NavigationManager {
     }
 
     /// Navigate to home with a wipe transition, clearing the page stack.
-    func navigateToHome(using controller: GridController, renderer: PageRenderer) {
+    func navigateToHome(using controller: GridController, renderer: PageRenderer, onComplete: (() -> Void)? = nil) {
         guard !isTransitioning, currentPage != .home else { return }
         isTransitioning = true
         pageStack.removeAll()
 
-        performWipeTransition(using: controller, renderer: renderer) { [weak self] in
+        performWipeTransition(using: controller, renderer: renderer, onComplete: onComplete) { [weak self] in
             self?.currentPage = .home
         }
     }
@@ -58,6 +58,7 @@ final class NavigationManager {
     private func performWipeTransition(
         using controller: GridController,
         renderer: PageRenderer,
+        onComplete: (() -> Void)? = nil,
         pageUpdate: @escaping () -> Void
     ) {
         guard let grid = controller.grid else {
@@ -78,6 +79,7 @@ final class NavigationManager {
 
             controller.wipe.wipeIn(on: grid) { [weak self] in
                 self?.isTransitioning = false
+                onComplete?()
             }
         }
     }

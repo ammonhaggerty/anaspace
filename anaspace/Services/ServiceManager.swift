@@ -21,6 +21,11 @@ final class ServiceManager {
     /// Set by ContentView so ServiceManager can check autoplay preference.
     weak var appState: AppState?
 
+    /// Active triad context — set by the app layer so observations respect the current state.
+    var activeSubject: String?
+    var activeYear: Int?
+    var activeLocationLabel: String?
+
     // Progress — single observable surface for the UI
     let progress = ObservationProgress()
 
@@ -286,7 +291,10 @@ final class ServiceManager {
             timestamp: .now,
             mode: progress.mode,
             duration: progress.elapsed,
-            resolutionTrigger: trigger
+            resolutionTrigger: trigger,
+            activeSubject: activeSubject,
+            activeYear: activeYear,
+            activeLocationLabel: activeLocationLabel
         )
 
         // Log what we're sending
@@ -593,7 +601,7 @@ final class ServiceManager {
     }
 
     /// Query Claude with a location change — subject and year are fixed, location is new.
-    func queryLocationChange(subject: String, year: Int, location: String, locationResult: LocationResult? = nil) {
+    func queryLocationChange(subject: String, subjectType: String, year: Int, location: String, locationResult: LocationResult? = nil) {
         isContextChangeQuery = true
         cancelAllTasks()
         progress.reset()
@@ -610,7 +618,7 @@ final class ServiceManager {
                     return
                 }
                 let result = try await claude.processLocationChange(
-                    subject: subject, year: year, location: location
+                    subject: subject, subjectType: subjectType, year: year, location: location
                 )
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)

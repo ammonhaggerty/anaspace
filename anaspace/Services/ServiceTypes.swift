@@ -96,6 +96,15 @@ struct ObservationSignals: Sendable {
     var duration: TimeInterval
     var resolutionTrigger: ResolutionTrigger
 
+    // Active triad context — set when user has an existing observation loaded
+    var activeSubject: String?
+    var activeYear: Int?
+    var activeLocationLabel: String?
+
+    var hasActiveTriad: Bool {
+        activeSubject != nil && activeYear != nil && activeLocationLabel != nil
+    }
+
     init(
         shazamResult: ShazamResult? = nil,
         transcript: TranscriptResult? = nil,
@@ -104,7 +113,10 @@ struct ObservationSignals: Sendable {
         timestamp: Date = .now,
         mode: ObservationMode = .tap,
         duration: TimeInterval = 0,
-        resolutionTrigger: ResolutionTrigger = .hardTimeout
+        resolutionTrigger: ResolutionTrigger = .hardTimeout,
+        activeSubject: String? = nil,
+        activeYear: Int? = nil,
+        activeLocationLabel: String? = nil
     ) {
         self.shazamResult = shazamResult
         self.transcript = transcript
@@ -114,6 +126,9 @@ struct ObservationSignals: Sendable {
         self.mode = mode
         self.duration = duration
         self.resolutionTrigger = resolutionTrigger
+        self.activeSubject = activeSubject
+        self.activeYear = activeYear
+        self.activeLocationLabel = activeLocationLabel
     }
 }
 

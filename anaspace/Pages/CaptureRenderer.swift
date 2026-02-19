@@ -48,7 +48,13 @@ final class CaptureRenderer: NSObject {
     private var lastTranscriptText: String?
     private var cols: Int = 0
 
-    // Shazam indicator state
+    // Evaluating header label (randomly chosen per session)
+    private static let evaluatingLabels = [
+        "TRAVERSING...", "MAPPING...", "EXCAVATING...", "EXPLORING...",
+        "SURFACING...", "UNEARTHING...", "THREADING...", "CONNECTING...",
+        "WEAVING...", "HARMONIZING...", "ATTUNING...",
+    ]
+    private var evaluatingLabel: String = "EXPLORING..."
 
     // Signal carousel state
     private var signals: [SignalItem] = []
@@ -98,6 +104,7 @@ final class CaptureRenderer: NSObject {
 
     func transitionToEvaluating(signals: [SignalItem]) {
         mode = .evaluating
+        self.evaluatingLabel = Self.evaluatingLabels.randomElement()!
         self.signals = signals
         self.currentSignalIndex = 0
         self.signalPhase = .building
@@ -162,8 +169,8 @@ final class CaptureRenderer: NSObject {
             items.append(SignalItem(label: "LOCATION", value: "LOCATING..."))
         }
 
-        // Year: only show if known (Shazam match or explicit context year)
-        if let year = progress.shazamResult?.releaseYear ?? contextYear {
+        // Year: only show if known from Shazam match
+        if let year = progress.shazamResult?.releaseYear {
             items.append(SignalItem(label: "YEAR", value: "\(year)"))
         }
 
@@ -240,8 +247,7 @@ final class CaptureRenderer: NSObject {
     private func renderEvaluatingHeader(grid: CharacterGrid, progress: ObservationProgress) {
         var row0 = [CellState](repeating: .empty, count: cols)
 
-        // "EVALUATING" centered
-        let label = "EVALUATING"
+        let label = evaluatingLabel
         let labelStart = (cols - label.count) / 2
         for (i, ch) in label.enumerated() {
             let col = labelStart + i

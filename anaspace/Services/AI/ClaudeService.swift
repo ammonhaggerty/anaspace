@@ -81,7 +81,7 @@ final class ClaudeService: ObservationService {
       "birthInfo": "B. YEAR, PLACE" for individuals, "EST. YEAR, PLACE" for groups, or "YEAR, PLACE" for non-artist subjects (e.g. album release year/city, venue opening year/city),
       "place": "City, State | Country",
       "year": 1978,
-      "bio": "Two short paragraphs, 400-500 characters total. First paragraph: what the subject was doing in this specific year. Second paragraph: the subject's connection to this specific place.",
+      "bio": "Two short paragraphs, 300-400 characters total. First paragraph: what the subject was doing in this specific year. Second paragraph: the subject's connection to this specific place.",
       "narrative": "One sentence connecting subject, place, and year.",
       "entities": [
         {
@@ -90,7 +90,7 @@ final class ClaudeService: ObservationService {
           "entityType": "collaborator|peer|influence|follower|creation|place|event|movement",
           "relationship": "Brief description of connection to subject",
           "relevance": 0.95,
-          "description": "400-500 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity.",
+          "description": "200-300 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity.",
           "recommendedSong": "Song Title" or null
         }
       ],
@@ -102,7 +102,7 @@ final class ClaudeService: ObservationService {
     top 5 artists/bands most associated with this subject, ordered by relevance. These are used \
     for music playback — the app will search each artist's catalog near the stated year. \
     For artist subjects, set keyArtists to an empty array [].
-    - Return 1-10 entities. Quality over quantity.
+    - Return 8 entities. Fill the culture map — more connections paint a richer picture.
     - Entity names MUST be the shortest recognizable proper noun. HARD LIMIT: 20 characters max, \
     target 14 or fewer. ALL CAPS. Strip everything that isn't the core name: \
     no locations, no "HQ"/"Studios"/"Party"/"Festival", no descriptors, no subtitles. \
@@ -111,8 +111,8 @@ final class ClaudeService: ObservationService {
     WRONG: "BLACK PANTHER PARTY OAKLAND HQ", "MUSCLE SHOALS SOUND STUDIO", "ABBEY ROAD STUDIOS LONDON", \
     "FILLMORE WEST VENUE", "MONTEREY POP FESTIVAL 1967"
     - Relevance: 0.0-1.0. Reserve 0.9+ for direct collaborators or defining works.
-    - Bio: 400-500 characters max. Do NOT write a generic biography. Ground it in the specific year and place.
-    - Entity descriptions: 400-500 characters. Explain this entity's specific connection to the subject \
+    - Bio: 300-400 characters max. Do NOT write a generic biography. Ground it in the specific year and place.
+    - Entity descriptions: 200-300 characters. Explain this entity's specific connection to the subject \
     in the stated year and place. Not a generic summary of the entity.
     - Subject: By default, resolve to the primary artist/band. Exception: when the user message \
     explicitly states a non-artist focus (e.g. "FOCUS ON: album/venue/movement"), keep that entity \
@@ -133,10 +133,15 @@ final class ClaudeService: ObservationService {
     already conveys the category — subtitle must add specific context or be null. \
     Never include album names alongside song names or vice versa. Pick one creation per work. \
     No format descriptors (no "Double Album", "LP", "Single", "Debut", etc.).
+    - LOCATION CHANGES — GEOGRAPHIC ANCHOR IS MANDATORY: When the user message says \
+    "LOCATION CHANGE", the new subject MUST be from, founded in, or synonymous with the NEW \
+    location. Never carry over a subject from the previous location. A strong musical connection \
+    to the prior subject does NOT justify picking something from the wrong city or country. \
+    Geography comes first, musical spirit second.
     - CRITICAL: You must ALWAYS return the JSON object. Never return commentary, apologies, \
     explanations, or questions. If you lack specific knowledge about a place or era, broaden \
-    your search (city → region → country) until you find a relevant artist. There is always \
-    a culturally relevant musician for any location and year — find one.
+    your search (city → region → country) until you find a relevant subject. There is always \
+    a culturally relevant subject for any location and year — find one.
     """
 
     // MARK: - ObservationService Conformance
@@ -190,27 +195,65 @@ final class ClaudeService: ObservationService {
     }
 
     /// Query Claude with location change — subject and year are fixed, location is new.
-    /// Encourages finding a local equivalent artist over showing the same artist in the new place.
-    func processLocationChange(subject: String, year: Int, location: String) async throws -> ClaudeResult {
-        let userMessage = """
-        LOCATION CHANGE: The user was exploring \(subject) in \(year) and moved to \(location).
-        Subject: \(subject) | Year: \(year) | New location: \(location)
+    /// Finds the local equivalent that matches the current subject's type and musical spirit.
+    func processLocationChange(subject: String, subjectType: String, year: Int, location: String) async throws -> ClaudeResult {
+        let isArtistType = ["artist", "band", "poet", "composer", "dj", "producer"].contains(subjectType.lowercased())
+        let typeGuidance: String
+        if isArtistType {
+            typeGuidance = """
+            The current subject is an artist/band. Find the LOCAL artist or musician in \(location) \
+            who best embodies the same musical spirit, ethos, or genre as \(subject) in \(year).
+            """
+        } else {
+            typeGuidance = """
+            The current subject is a \(subjectType). FIRST, try to find a similar \(subjectType) in \
+            \(location) that embodies the same musical spirit, ethos, or genre as \(subject). \
+            Keep likes with likes: if the subject is an event, find a comparable event; if it's a \
+            venue, find a comparable venue; if it's a movement, find the local equivalent movement. \
+            The replacement should be FROM \(location) or closely associated with \(location). \
+            If no suitable \(subjectType) exists in \(location) for \(year), THEN fall back to finding \
+            a local artist or band that embodies the same musical spirit as \(subject).
+            """
+        }
 
-        Year \(year) is FIXED — do not change it. The new location \(location) is FIXED. \
-        Your primary goal: find the LOCAL artist or musician in \(location) who best represents \
-        the musical lineage, spirit, or cultural role of \(subject) in \(year). \
-        STRONGLY prefer a local artist — someone who was born in, based in, or primarily associated \
-        with \(location). A local equivalent is almost always more interesting than showing \(subject) \
-        in a new city. \
-        Only keep \(subject) as the subject if they have a genuine, specific connection to \(location) \
-        in \(year) (e.g., they lived there, recorded there, performed a landmark show there). \
-        A generic "their music was popular worldwide" is NOT a sufficient connection. \
-        Search broadly: neighborhood → city → region → country. If no exact city match exists, \
-        find the best artist from the surrounding region or country for that era. \
+        let userMessage = """
+        LOCATION CHANGE: The user was exploring \(subject) (\(subjectType)) in \(year) and moved to \(location).
+        Subject: \(subject) | Subject type: \(subjectType) | Year: \(year) | New location: \(location)
+
+        Year \(year) is FIXED — do not change it. The new location \(location) is FIXED.
+
+        Think of this as: "Who is \(subject)'s closest counterpart in \(location) in \(year)?"
+
+        ## RULE 1: CLOSEST ANALOG TO \(subject)
+        The new subject must be the strongest musical analog to \(subject) — someone (or something) \
+        with a direct connection: similar style, energy, genre, collaboration, shared lineage, or \
+        mutual influence. The tighter the musical relationship to \(subject), the better. \
+        An obscure but deeply connected choice is better than a famous but loosely related one.
+
+        \(typeGuidance)
+
+        ## RULE 2: MUST BE FROM \(location)
+        The new subject MUST also be closely associated with \(location) — born there, based there, \
+        or synonymous with it. Do NOT pick a subject from another city or country, no matter how \
+        strong the musical link to \(subject). If \(subject) themselves have a genuine, specific \
+        connection to \(location) in \(year) (lived there, recorded there, performed a landmark show), \
+        they can remain the subject — but "popular worldwide" is NOT enough. \
+        Search broadly if needed: neighborhood → city → region → country.
+
+        ## ENTITY RULES FOR LOCATION CHANGES
+        The culture map should reflect the new subject's world anchored to \(location):
+        - **influence**: Can be from anywhere — who shaped the subject's sound.
+        - **peer**: Strongly prefer local to \(location) — who was part of the same scene HERE?
+        - **follower**: Strongly prefer local to \(location) — who here carried on this tradition?
+        - **collaborator**: Strongly prefer connections to \(location) — sessions, tours, or projects here.
+        - **creation, place, event, movement**: Should be tied to \(location).
+        Aim for 8 entities. A rich, full culture map is always better than a sparse one.
+
         You MUST return the JSON object. Never return commentary, apologies, or explanations. \
-        There is always a relevant artist — broaden your search until you find one. \
+        There is always a relevant subject — broaden your search until you find one. \
         Build the culture map around this subject, anchored to \(year) and \(location).
         """
+        print("[Claude] *** LOCATION CHANGE PATH *** subjectType=\(subjectType) subject=\(subject) location=\(location)")
         print("[Claude] Request: \(userMessage)")
 
         let request = try buildRequest(userMessage: userMessage)
@@ -231,7 +274,7 @@ final class ClaudeService: ObservationService {
         }
 
         let text = extractResponseText(from: json)
-        print("[Claude] Response: \(text)")
+        print("[Claude] LOCATION CHANGE Response: \(text)")
         return parseClaudeResponse(text)
     }
 
@@ -425,6 +468,25 @@ final class ClaudeService: ObservationService {
               let transcript = signals.transcript else { return "" }
         var songLine = "Song: \(shazam.title) | Artist: \(shazam.artist)"
         if let year = shazam.releaseYear { songLine += " | Year: \(year)" }
+
+        if signals.hasActiveTriad,
+           let subject = signals.activeSubject,
+           let activeYear = signals.activeYear,
+           let loc = signals.activeLocationLabel {
+            return """
+            OBSERVATION: Music + user speech
+            \(songLine)
+            GPS Location: \(location)
+            User said: "\(transcript.text)"
+
+            ACTIVE CONTEXT: Subject: \(subject) | Year: \(activeYear) | Location: \(loc)
+
+            The detected song provides context. The user's speech may override triad dimensions. \
+            Interpret their intent in the context of the existing triad — preserve any dimensions \
+            they don't explicitly change.
+            """
+        }
+
         return """
         OBSERVATION: Music + user speech
         \(songLine)
@@ -437,6 +499,29 @@ final class ClaudeService: ObservationService {
 
     private func buildVoiceCommandMessage(signals: ObservationSignals, location: String, currentYear: Int) -> String {
         guard let transcript = signals.transcript else { return "" }
+
+        if signals.hasActiveTriad,
+           let subject = signals.activeSubject,
+           let year = signals.activeYear,
+           let loc = signals.activeLocationLabel {
+            return """
+            OBSERVATION: Voice command (no music)
+            User said: "\(transcript.text)"
+            GPS Location: \(location)
+
+            ACTIVE CONTEXT — the user already has a culture map loaded:
+            Subject: \(subject) | Year: \(year) | Location: \(loc)
+
+            Interpret the user's speech in the context of this existing triad. \
+            If they mention a year (e.g. "how about 1982"), change the year but KEEP the subject and location. \
+            If they mention an artist, band, song, or lyrics, resolve it as a subject change — \
+            keep the location and let the year flex to the most relevant era. \
+            If they mention a place, treat it as a location change — keep the subject and year. \
+            Only dimensions they explicitly reference should change; preserve the rest. \
+            Build the culture map with the updated triad.
+            """
+        }
+
         return """
         OBSERVATION: Voice command (no music)
         User said: "\(transcript.text)"
@@ -448,6 +533,25 @@ final class ClaudeService: ObservationService {
 
     private func buildLyricIdentificationMessage(signals: ObservationSignals, location: String) -> String {
         guard let transcript = signals.transcript else { return "" }
+
+        if signals.hasActiveTriad,
+           let subject = signals.activeSubject,
+           let year = signals.activeYear,
+           let loc = signals.activeLocationLabel {
+            return """
+            OBSERVATION: Possible lyrics (no Shazam match)
+            User sang/recited: "\(transcript.text)"
+            GPS Location: \(location)
+
+            ACTIVE CONTEXT: Subject: \(subject) | Year: \(year) | Location: \(loc)
+
+            Identify the song and artist from the lyrics. Resolve in the context of the current \
+            triad — the identified artist becomes the new subject, the location stays as \(loc), \
+            and the year should flex to the song's release year or the artist's peak era at that location. \
+            If unidentifiable, keep the current subject and triad.
+            """
+        }
+
         return """
         OBSERVATION: Possible lyrics (no Shazam match)
         User sang/recited: "\(transcript.text)"
