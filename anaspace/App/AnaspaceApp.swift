@@ -42,6 +42,7 @@ struct ContentView: View {
     @State private var activeHistoryEntryId: UUID?
     @State private var usedCircaYears: Set<Int> = []
     @State private var contextChangeSnapshot: ContextChangeSnapshot?
+    @State private var streamingExitInitiated = false
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -517,7 +518,7 @@ struct ContentView: View {
                 serviceManager.audioPlayer.stopDisplayUpdates()
             }
         }
-        .onChange(of: serviceManager.progress.latestResult?.narrative) { _, _ in
+        .onChange(of: serviceManager.progress.resultVersion) { _, _ in
             handleResultUpdate()
         }
         .onChange(of: serviceManager.progress.phase) { _, newPhase in
@@ -544,13 +545,19 @@ struct ContentView: View {
                    serviceManager.progress.mode == .tap,
                    serviceManager.progress.shazamResult == nil {
                     homeRenderer?.showNothingObserved = true
-                    controller.exitCapture { grid in
-                        populateGrid(grid)
+                    if controller.isCapturing && !streamingExitInitiated {
+                        controller.exitCapture { grid in
+                            populateGrid(grid)
+                        }
+                    } else if !controller.isCapturing {
+                        refreshGrid()
                     }
                 } else {
                     handleResultUpdate(saveToHistory: true)
-                    controller.exitCapture { grid in
-                        populateGrid(grid)
+                    if controller.isCapturing && !streamingExitInitiated {
+                        controller.exitCapture { grid in
+                            populateGrid(grid)
+                        }
                     }
                 }
             }
@@ -743,8 +750,24 @@ struct ContentView: View {
             historyStore.add(entry)
         }
 
-        // Only refresh grid if not in capture mode — exitCapture will handle it
-        if !controller.isCapturing {
+        if controller.isCapturing {
+            // Wait until all entity names are captured before exiting capture.
+            // Descriptions, playlist info, and details stream in after the map is visible.
+            // Guard: only call exitCapture once per capture cycle.
+            if !streamingExitInitiated {
+                let hasAllEntities = result.connections.count >= 8
+                if hasAllEntities || !result.isStreaming {
+                    streamingExitInitiated = true
+                    if contextChangeSnapshot != nil {
+                        contextChangeSnapshot = nil
+                    }
+                    controller.exitCapture { grid in
+                        populateGrid(grid)
+                    }
+                }
+            }
+        } else {
+            streamingExitInitiated = false
             refreshGrid()
         }
     }

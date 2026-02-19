@@ -35,6 +35,7 @@ final class ObservationProgress {
     // Result
     private(set) var latestResult: ClaudeResult?
     private(set) var isResultSuperseded = false
+    private(set) var resultVersion: Int = 0
 
     // Play-by-play event log
     private(set) var events: [ObservationEvent] = []
@@ -114,6 +115,7 @@ final class ObservationProgress {
     func setLatestResult(_ result: ClaudeResult?, superseded: Bool = false) {
         latestResult = result
         isResultSuperseded = superseded
+        resultVersion += 1
         if let result {
             logEvent("Claude result: \(result.subject) (streaming: \(result.isStreaming))")
         }
@@ -139,6 +141,7 @@ final class ObservationProgress {
         location = nil
         latestResult = nil
         isResultSuperseded = false
+        resultVersion = 0
         events = []
     }
 }

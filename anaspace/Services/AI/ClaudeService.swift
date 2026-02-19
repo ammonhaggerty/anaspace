@@ -90,11 +90,16 @@ final class ClaudeService: ObservationService {
           "entityType": "collaborator|peer|influence|follower|creation|place|event|movement",
           "relationship": "Brief description of connection to subject",
           "relevance": 0.95,
-          "description": "200-300 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity.",
           "recommendedSong": "Song Title" or null
         }
       ],
-      "keyArtists": ["ARTIST 1", "ARTIST 2", "ARTIST 3", "ARTIST 4", "ARTIST 5"]
+      "keyArtists": ["ARTIST 1", "ARTIST 2", "ARTIST 3", "ARTIST 4", "ARTIST 5"],
+      "entityDescriptions": [
+        {
+          "name": "ENTITY NAME (matching name from entities array)",
+          "description": "200-300 characters. How this entity connects to the subject in the stated year and place. Ground it specifically — not a generic bio of the entity."
+        }
+      ]
     }
 
     ## Rules
@@ -156,7 +161,10 @@ final class ClaudeService: ObservationService {
     // MARK: - Public API
 
     /// Query Claude with year and location fixed, finding the closest match to a subject's legacy.
-    func processYearChange(subject: String, year: Int, location: String) async throws -> ClaudeResult {
+    func processYearChange(
+        subject: String, year: Int, location: String,
+        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
+    ) async throws -> ClaudeResult {
         let userMessage = """
         YEAR CHANGE: The user was exploring \(subject) and changed the year to \(year).
         Location: \(location)
@@ -172,31 +180,16 @@ final class ClaudeService: ObservationService {
         """
         print("[Claude] Request: \(userMessage)")
 
-        let request = try buildRequest(userMessage: userMessage)
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        if httpResponse.statusCode != 200 {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            print("[Claude] API error \(httpResponse.statusCode): \(body)")
-            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        let text = extractResponseText(from: json)
-        print("[Claude] Response: \(text)")
-        return parseClaudeResponse(text)
+        let request = try buildStreamingRequest(userMessage: userMessage)
+        return try await streamRequest(request, onUpdate: onUpdate)
     }
 
     /// Query Claude with location change — subject and year are fixed, location is new.
     /// Finds the local equivalent that matches the current subject's type and musical spirit.
-    func processLocationChange(subject: String, subjectType: String, year: Int, location: String) async throws -> ClaudeResult {
+    func processLocationChange(
+        subject: String, subjectType: String, year: Int, location: String,
+        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
+    ) async throws -> ClaudeResult {
         let isArtistType = ["artist", "band", "poet", "composer", "dj", "producer"].contains(subjectType.lowercased())
         let typeGuidance: String
         if isArtistType {
@@ -256,30 +249,16 @@ final class ClaudeService: ObservationService {
         print("[Claude] *** LOCATION CHANGE PATH *** subjectType=\(subjectType) subject=\(subject) location=\(location)")
         print("[Claude] Request: \(userMessage)")
 
-        let request = try buildRequest(userMessage: userMessage)
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        if httpResponse.statusCode != 200 {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            print("[Claude] API error \(httpResponse.statusCode): \(body)")
-            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        let text = extractResponseText(from: json)
-        print("[Claude] LOCATION CHANGE Response: \(text)")
-        return parseClaudeResponse(text)
+        let request = try buildStreamingRequest(userMessage: userMessage)
+        return try await streamRequest(request, onUpdate: onUpdate)
     }
 
     /// Query Claude with a subject change — location is fixed, year flexes to most relevant era.
-    func processSubjectChange(connection: CultureConnection? = nil, newSubject: String, priorSubject: String, location: String, year: Int) async throws -> ClaudeResult {
+    func processSubjectChange(
+        connection: CultureConnection? = nil, newSubject: String, priorSubject: String,
+        location: String, year: Int,
+        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
+    ) async throws -> ClaudeResult {
         // Build entity context string for non-artist entities
         let entityContext: String
         if let conn = connection, !conn.entityType.hasArtistCatalog {
@@ -329,79 +308,31 @@ final class ClaudeService: ObservationService {
         """
         print("[Claude] Request: \(userMessage)")
 
-        let request = try buildRequest(userMessage: userMessage)
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        if httpResponse.statusCode != 200 {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            print("[Claude] API error \(httpResponse.statusCode): \(body)")
-            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        let text = extractResponseText(from: json)
-        print("[Claude] Response: \(text)")
-        return parseClaudeResponse(text)
+        let request = try buildStreamingRequest(userMessage: userMessage)
+        return try await streamRequest(request, onUpdate: onUpdate)
     }
 
     /// Send a shortcut query with a pre-built prompt directly to Claude.
-    func processShortcutQuery(prompt: String) async throws -> ClaudeResult {
+    func processShortcutQuery(
+        prompt: String,
+        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
+    ) async throws -> ClaudeResult {
         print("[Claude] Shortcut request: \(prompt)")
 
-        let request = try buildRequest(userMessage: prompt)
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        if httpResponse.statusCode != 200 {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            print("[Claude] API error \(httpResponse.statusCode): \(body)")
-            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        let text = extractResponseText(from: json)
-        print("[Claude] Response: \(text)")
-        return parseClaudeResponse(text)
+        let request = try buildStreamingRequest(userMessage: prompt)
+        return try await streamRequest(request, onUpdate: onUpdate)
     }
 
     /// Send observation signals to Claude and return a single result.
-    func processObservation(from signals: ObservationSignals) async throws -> ClaudeResult {
+    func processObservation(
+        from signals: ObservationSignals,
+        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
+    ) async throws -> ClaudeResult {
         let userMessage = buildUserMessage(from: signals)
         print("[Claude] Request: \(userMessage)")
 
-        let request = try buildRequest(userMessage: userMessage)
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        if httpResponse.statusCode != 200 {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            print("[Claude] API error \(httpResponse.statusCode): \(body)")
-            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ClaudeServiceError.noResponse
-        }
-
-        let text = extractResponseText(from: json)
-        print("[Claude] Response: \(text)")
-        return parseClaudeResponse(text)
+        let request = try buildStreamingRequest(userMessage: userMessage)
+        return try await streamRequest(request, onUpdate: onUpdate)
     }
 
     // MARK: - Assembly Path Detection
@@ -599,33 +530,109 @@ final class ClaudeService: ObservationService {
         return request
     }
 
-    // MARK: - Response Extraction
+    private func buildStreamingRequest(userMessage: String) throws -> URLRequest {
+        guard let key = apiKey, !key.isEmpty else {
+            throw ClaudeServiceError.noApiKey
+        }
 
-    /// Extract the assistant's text from the Messages API response.
-    private func extractResponseText(from json: [String: Any]) -> String {
-        // Log stop reason — "max_tokens" means truncation
-        if let stopReason = json["stop_reason"] as? String {
-            print("[Claude] stop_reason: \(stopReason)")
-            if stopReason == "max_tokens" {
-                print("[Claude] WARNING: Response was truncated (hit max_tokens limit)")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue(key, forHTTPHeaderField: "x-api-key")
+        request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+
+        let body: [String: Any] = [
+            "model": model.rawValue,
+            "max_tokens": 4096,
+            "stream": true,
+            "system": systemPrompt,
+            "messages": [
+                ["role": "user", "content": userMessage]
+            ]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    // MARK: - Streaming
+
+    /// Stream a request via SSE, calling `onUpdate` with partial results at parse thresholds.
+    /// Returns the final complete result.
+    private func streamRequest(
+        _ request: URLRequest,
+        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void
+    ) async throws -> ClaudeResult {
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ClaudeServiceError.noResponse
+        }
+
+        if httpResponse.statusCode != 200 {
+            // Read full error body
+            var errorData = Data()
+            for try await byte in bytes { errorData.append(byte) }
+            let body = String(data: errorData, encoding: .utf8) ?? "unknown"
+            print("[Claude] API error \(httpResponse.statusCode): \(body)")
+            throw ClaudeServiceError.apiError(statusCode: httpResponse.statusCode, body: body)
+        }
+
+        var textBuffer = ""
+        var lastParseLength = 0
+
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+
+            // SSE format: lines starting with "data: "
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = String(line.dropFirst(6))
+            guard payload != "[DONE]" else { break }
+
+            // Parse SSE event JSON
+            guard let eventData = payload.data(using: .utf8),
+                  let event = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] else {
+                continue
+            }
+
+            // Extract text from content_block_delta events
+            guard event["type"] as? String == "content_block_delta",
+                  let delta = event["delta"] as? [String: Any],
+                  delta["type"] as? String == "text_delta",
+                  let text = delta["text"] as? String else {
+                continue
+            }
+
+            textBuffer += text
+
+            // Determine parse threshold based on buffer size
+            let bufLen = textBuffer.count
+            let shouldParse: Bool
+            if bufLen < 150 {
+                shouldParse = false
+            } else if bufLen < 400 {
+                shouldParse = bufLen - lastParseLength >= 250
+            } else if bufLen < 2000 {
+                // Entity core objects (~150 chars each)
+                shouldParse = bufLen - lastParseLength >= 150
+            } else {
+                // Descriptions (~300 chars each)
+                shouldParse = bufLen - lastParseLength >= 300
+            }
+
+            if shouldParse {
+                lastParseLength = bufLen
+                let partial = parseClaudeResponse(textBuffer, isStreaming: true)
+                if partial.subject != "Observation" {
+                    onUpdate(partial)
+                }
             }
         }
 
-        guard let content = json["content"] as? [[String: Any]] else {
-            print("[Claude] EXTRACT FAIL: no 'content' array in response. Keys: \(json.keys.sorted())")
-            if let errorMsg = json["error"] as? [String: Any] {
-                print("[Claude] API error object: \(errorMsg)")
-            }
-            return ""
-        }
-        let text = content.compactMap { block -> String? in
-            guard block["type"] as? String == "text" else { return nil }
-            return block["text"] as? String
-        }.joined()
-        if text.isEmpty {
-            print("[Claude] EXTRACT WARN: content blocks present but no text extracted. Blocks: \(content.count)")
-        }
-        return text
+        // Final authoritative parse
+        print("[Claude] Stream complete, buffer: \(textBuffer.count) chars")
+        let finalResult = parseClaudeResponse(textBuffer, isStreaming: false)
+        print("[Claude] Response: \(textBuffer.prefix(200))")
+        return finalResult
     }
 
     // MARK: - Response Parsing
@@ -644,31 +651,37 @@ final class ClaudeService: ObservationService {
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func parseClaudeResponse(_ text: String) -> ClaudeResult {
+    private func parseClaudeResponse(_ text: String, isStreaming: Bool = false) -> ClaudeResult {
         let cleaned = stripCodeFences(text)
 
         guard let data = cleaned.data(using: .utf8) else {
-            print("[Claude] PARSE FAIL: could not convert to UTF-8 data")
-            print("[Claude] Raw text (\(text.count) chars): \(text.prefix(500))")
+            if !isStreaming {
+                print("[Claude] PARSE FAIL: could not convert to UTF-8 data")
+                print("[Claude] Raw text (\(text.count) chars): \(text.prefix(500))")
+            }
             return fallbackResult(text)
         }
 
         // Try parsing as-is first
         if let json = tryParseJSON(data) {
-            return buildResult(from: json, rawText: text)
+            return buildResult(from: json, rawText: text, isStreaming: isStreaming)
         }
 
         // Attempt to repair truncated JSON
-        print("[Claude] Initial parse failed, attempting JSON repair (\(cleaned.count) chars)")
+        if !isStreaming {
+            print("[Claude] Initial parse failed, attempting JSON repair (\(cleaned.count) chars)")
+        }
         if let repaired = repairTruncatedJSON(cleaned),
            let repairedData = repaired.data(using: .utf8),
            let json = tryParseJSON(repairedData) {
-            print("[Claude] JSON repair succeeded")
-            return buildResult(from: json, rawText: text)
+            if !isStreaming { print("[Claude] JSON repair succeeded") }
+            return buildResult(from: json, rawText: text, isStreaming: isStreaming)
         }
 
-        print("[Claude] PARSE FAIL: JSON repair also failed")
-        print("[Claude] Cleaned text (\(cleaned.count) chars): \(cleaned.prefix(500))")
+        if !isStreaming {
+            print("[Claude] PARSE FAIL: JSON repair also failed")
+            print("[Claude] Cleaned text (\(cleaned.count) chars): \(cleaned.prefix(500))")
+        }
         return fallbackResult(text)
     }
 
@@ -676,7 +689,8 @@ final class ClaudeService: ObservationService {
         try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    private func buildResult(from json: [String: Any], rawText: String) -> ClaudeResult {
+    private func buildResult(from json: [String: Any], rawText: String, isStreaming: Bool = false) -> ClaudeResult {
+        let descriptions = json["entityDescriptions"] as? [[String: Any]]
         let result = ClaudeResult(
             subject: json["subject"] as? String ?? "Unknown",
             subjectType: json["subjectType"] as? String ?? "unknown",
@@ -685,11 +699,13 @@ final class ClaudeService: ObservationService {
             year: json["year"] as? Int ?? Calendar.current.component(.year, from: .now),
             bio: json["bio"] as? String ?? "",
             narrative: json["narrative"] as? String ?? rawText,
-            connections: parseEntities(json["entities"]),
+            connections: parseEntities(json["entities"], descriptions: descriptions),
             keyArtists: (json["keyArtists"] as? [String]) ?? [],
-            isStreaming: false
+            isStreaming: isStreaming
         )
-        print("[Claude] Parsed OK: subject=\(result.subject), place=\(result.place), year=\(result.year), entities=\(result.connections.count)")
+        if !isStreaming {
+            print("[Claude] Parsed OK: subject=\(result.subject), place=\(result.place), year=\(result.year), entities=\(result.connections.count)")
+        }
         return result
     }
 
@@ -802,8 +818,19 @@ final class ClaudeService: ObservationService {
         return (line?.isEmpty == true) ? nil : line
     }
 
-    private func parseEntities(_ raw: Any?) -> [CultureConnection] {
+    private func parseEntities(_ raw: Any?, descriptions: [[String: Any]]? = nil) -> [CultureConnection] {
         guard let array = raw as? [[String: Any]] else { return [] }
+
+        // Build a name→description lookup from entityDescriptions
+        var descriptionMap: [String: String] = [:]
+        if let descs = descriptions {
+            for d in descs {
+                if let name = d["name"] as? String, let desc = d["description"] as? String {
+                    descriptionMap[name.uppercased()] = desc
+                }
+            }
+        }
+
         return array.compactMap { item in
             guard let rawName = item["name"] as? String,
                   let relationship = item["relationship"] as? String else { return nil }
@@ -812,7 +839,10 @@ final class ClaudeService: ObservationService {
             let entityType = (item["entityType"] as? String)
                 .flatMap { EntityType(rawValue: $0) } ?? .peer
             let relevance = item["relevance"] as? Double ?? 0.5
-            let description = item["description"] as? String ?? ""
+            // Prefer entityDescriptions lookup, fall back to inline description
+            let description = descriptionMap[name.uppercased()]
+                ?? item["description"] as? String
+                ?? ""
             let recommendedSong = firstLine(item["recommendedSong"] as? String)
             return CultureConnection(
                 name: name,

@@ -313,7 +313,9 @@ final class ServiceManager {
                     resolve()
                     return
                 }
-                let result = try await claude.processObservation(from: signals)
+                let result = try await claude.processObservation(from: signals) { [weak self] partialResult in
+                    self?.progress.setLatestResult(partialResult)
+                }
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
                 progress.setClaudeProcessing(false)
@@ -365,7 +367,9 @@ final class ServiceManager {
                 claudeTask?.cancel()
                 claudeTask = Task {
                     do {
-                        let result = try await claude.processObservation(from: mergedSignals)
+                        let result = try await claude.processObservation(from: mergedSignals) { [weak self] partialResult in
+                            self?.progress.setLatestResult(partialResult)
+                        }
                         guard !Task.isCancelled else { return }
                         progress.setLatestResult(result, superseded: false)
                     } catch {
@@ -518,7 +522,9 @@ final class ServiceManager {
                     resolve()
                     return
                 }
-                let result = try await claude.processShortcutQuery(prompt: prompt)
+                let result = try await claude.processShortcutQuery(prompt: prompt) { [weak self] partialResult in
+                    self?.progress.setLatestResult(partialResult)
+                }
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
                 progress.setClaudeProcessing(false)
@@ -554,7 +560,9 @@ final class ServiceManager {
                 let result = try await claude.processSubjectChange(
                     connection: connection, newSubject: newSubject, priorSubject: priorSubject,
                     location: location, year: year
-                )
+                ) { [weak self] partialResult in
+                    self?.progress.setLatestResult(partialResult)
+                }
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
                 progress.setClaudeProcessing(false)
@@ -587,7 +595,9 @@ final class ServiceManager {
                 }
                 let result = try await claude.processYearChange(
                     subject: subject, year: year, location: location
-                )
+                ) { [weak self] partialResult in
+                    self?.progress.setLatestResult(partialResult)
+                }
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
                 progress.setClaudeProcessing(false)
@@ -619,7 +629,9 @@ final class ServiceManager {
                 }
                 let result = try await claude.processLocationChange(
                     subject: subject, subjectType: subjectType, year: year, location: location
-                )
+                ) { [weak self] partialResult in
+                    self?.progress.setLatestResult(partialResult)
+                }
                 guard !Task.isCancelled else { return }
                 progress.setLatestResult(result)
                 progress.setClaudeProcessing(false)
