@@ -36,6 +36,9 @@ The power is in pivoting. Change the year from 1971 to 1930, and the system asks
 
 After observation, the collected signals route to the intelligence layer, which builds a knowledge graph of cultural connections: collaborators, influences, followers, peers, creations, places, events, and movements. The result renders as a radial graph — the subject at the center, connections arranged by relevance and type in concentric rings. Each node has a curated playlist. Tapping a connection explores its own cultural context from a new center.
 
+![RocketSim_Screenshot_iPhone_17_Pro_6 3_2026-02-19_21 01 58](https://github.com/user-attachments/assets/0d2ba6ad-27f0-4e56-a013-ce625dded3f1)
+
+
 ---
 
 ## The Rendering Engine
