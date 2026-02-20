@@ -11,7 +11,7 @@ final class ServiceManager {
     let soundAnalysis = SoundAnalysisService()
     let speech = SpeechService()
     let music = MusicService()
-    let claude = ClaudeService()
+    let claude = FoundationModelService()
     let audioPlayer = AudioPlayerService()
     let queueBuilder: MusicQueueBuilder
 
@@ -298,17 +298,17 @@ final class ServiceManager {
         )
 
         // Log what we're sending
-        progress.logEvent("Claude signals — shazam: \(signals.shazamResult?.title ?? "none"), transcript: \(signals.transcript?.text ?? "none"), location: \(signals.location?.city ?? "none")")
+        progress.logEvent("FM signals — shazam: \(signals.shazamResult?.title ?? "none"), transcript: \(signals.transcript?.text ?? "none"), location: \(signals.location?.city ?? "none")")
         progress.setClaudeProcessing(true)
-        progress.logEvent("Sending to Claude (trigger: \(trigger.rawValue))")
+        progress.logEvent("Sending to FM (trigger: \(trigger.rawValue))")
 
         claudeTask?.cancel()
         claudeTask = Task {
             do {
                 try await claude.activate()
-                progress.logEvent("Claude API key: \(claude.isAvailable ? "available" : "MISSING")")
+                progress.logEvent("Foundation Model: \(claude.isAvailable ? "available" : "UNAVAILABLE")")
                 guard claude.isAvailable else {
-                    progress.logEvent("Claude skipped — no API key")
+                    progress.logEvent("FM skipped — model unavailable")
                     progress.setClaudeProcessing(false)
                     resolve()
                     return
@@ -321,7 +321,7 @@ final class ServiceManager {
                 progress.setClaudeProcessing(false)
                 resolve()
             } catch {
-                progress.logEvent("Claude error: \(error)")
+                progress.logEvent("FM error: \(error)")
                 progress.setClaudeProcessing(false)
                 resolve()
             }
@@ -530,7 +530,7 @@ final class ServiceManager {
                 progress.setClaudeProcessing(false)
                 resolve()
             } catch {
-                progress.logEvent("Claude error: \(error)")
+                progress.logEvent("FM error: \(error)")
                 progress.setClaudeProcessing(false)
                 resolve()
             }
@@ -568,7 +568,7 @@ final class ServiceManager {
                 progress.setClaudeProcessing(false)
                 resolve()
             } catch {
-                progress.logEvent("Claude error: \(error)")
+                progress.logEvent("FM error: \(error)")
                 progress.setClaudeProcessing(false)
                 resolve()
             }
@@ -603,7 +603,7 @@ final class ServiceManager {
                 progress.setClaudeProcessing(false)
                 resolve()
             } catch {
-                progress.logEvent("Claude error: \(error)")
+                progress.logEvent("FM error: \(error)")
                 progress.setClaudeProcessing(false)
                 resolve()
             }
@@ -637,7 +637,7 @@ final class ServiceManager {
                 progress.setClaudeProcessing(false)
                 resolve()
             } catch {
-                progress.logEvent("Claude error: \(error)")
+                progress.logEvent("FM error: \(error)")
                 progress.setClaudeProcessing(false)
                 resolve()
             }
