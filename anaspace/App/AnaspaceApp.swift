@@ -758,6 +758,11 @@ struct ContentView: View {
                 let hasAllEntities = result.connections.count >= 8
                 if hasAllEntities || !result.isStreaming {
                     streamingExitInitiated = true
+                    // Fade out old music when context change map appears;
+                    // new playlist loads silently and fades in via transitionToStream.
+                    if controller.isContextChangeCapture {
+                        serviceManager.audioPlayer.fadeOut()
+                    }
                     if contextChangeSnapshot != nil {
                         contextChangeSnapshot = nil
                     }

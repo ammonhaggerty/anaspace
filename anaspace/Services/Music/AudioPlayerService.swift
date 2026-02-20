@@ -175,6 +175,36 @@ final class AudioPlayerService {
         }
     }
 
+    /// Fade out current playback without loading new content.
+    /// Used when a context change grid appears — old music fades while new playlist loads.
+    func fadeOut(duration: TimeInterval = 1.5) {
+        guard state == .playing else { return }
+
+        state = .fading
+        fadeTimer?.invalidate()
+        var volume = playerNode?.volume ?? 1.0
+        let stepSize = Float(0.05 / duration)
+
+        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.state == .fading else { return }
+                volume -= stepSize
+                if volume <= 0 {
+                    self.fadeTimer?.invalidate()
+                    self.fadeTimer = nil
+                    self.stopEngine()
+                    self.state = .idle
+                    self.currentLevel = 0
+                    self.peakLevel = 0
+                    self.stopDisplayUpdates()
+                    self.renderPlayerRow()
+                } else {
+                    self.playerNode?.volume = volume
+                }
+            }
+        }
+    }
+
     func beginFadeAndPrepareForCapture() {
         logVolumeState("beginFadeAndPrepareForCapture")
         stopEngine()

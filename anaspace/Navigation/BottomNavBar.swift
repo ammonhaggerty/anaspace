@@ -154,6 +154,8 @@ struct ObserveButton: View {
             )
             .scaleEffect(isPressed ? 0.88 : 1.0)
             .animation(.easeInOut(duration: 0.12), value: isPressed)
+            .padding(20)
+            .contentShape(Circle())
             .onChange(of: isObserving) { _, active in
                 isPulsing = active
             }
@@ -162,11 +164,12 @@ struct ObserveButton: View {
                     .onChanged { _ in
                         if !isPressed {
                             isPressed = true
-                            onTap()  // Fires immediately — starts capture
+                            // Start 300ms timer — if held, begin capture in hold mode
                             holdTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
                                 Task { @MainActor in
                                     isHolding = true
-                                    onHoldStart()  // Upgrade to hold
+                                    onTap()       // Start capture
+                                    onHoldStart() // Upgrade to hold immediately
                                 }
                             }
                         }
@@ -177,9 +180,10 @@ struct ObserveButton: View {
                         holdTimer = nil
                         if isHolding {
                             isHolding = false
-                            onHoldEnd()  // End capture
+                            onHoldEnd()
+                        } else {
+                            onTap()  // Tap mode: fire on release
                         }
-                        // Tap mode: no action on release (continues on its own)
                     }
             )
     }
