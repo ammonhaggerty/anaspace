@@ -1,6 +1,6 @@
 # Anaspace
 
-**A cultural exploration engine for iOS, built entirely with Claude Code.**
+**A cultural exploration engine for iOS, built from scratch in ~18 hours using Claude Code Opus 4.6. Part of the February 2026 hackathon for Claude Code's 1st birthday.**
 
 https://github.com/user-attachments/assets/6a8ffbe9-c2a1-448b-9131-2b0104d62dde
 
@@ -11,6 +11,8 @@ Anaspace is a cultural exploration app for iOS. You hear a song, tap observe, an
 The app exists because algorithms have made music infinite and culture disposable. Streaming platforms optimize for engagement, not meaning, and the web of influence that gives art its depth has been flattened into a recommendation feed. Anaspace restores that context — not by replacing how you find music, but by revealing the connections that make what you're already hearing worth paying attention to.
 
 Anaspace is fully data sovereign: no sign-in, no data collection, no servers. The intent is to run entirely on device-side models, eliminating AI costs and ensuring the tool doesn't participate in the economic structures that shortchange artists. I wasn't able to finish local model integration for this hackathon, but I'm close — the plan is to release Anaspace as a free app with zero model cost. There is extraordinary music, art, and culture being forgotten every day, and this is a tool for finding it right where you are.
+
+**Note:** Running Anaspace on the Apple Foundation Model did not perform well enough, so for now I'm using Claude Haiku 4.6 and it will remain an open-source experiment. When Apple improves their internal model I will release this on the App Store as a free app. 
 
 ---
 
@@ -244,7 +246,7 @@ Before writing any code, five detailed specification documents were written coll
 | Apple frameworks | 11 |
 | Design specs | 5 |
 | Services | 12 |
-| Development time | ~15 hours |
+| Development time | ~18 hours |
 
 ### Development Workflow
 
