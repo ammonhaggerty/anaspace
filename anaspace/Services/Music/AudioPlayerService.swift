@@ -475,7 +475,7 @@ final class AudioPlayerService {
     private func startPlayback(fileURL: URL) async {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback)
+            try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
 
             let file = try AVAudioFile(forReading: fileURL)

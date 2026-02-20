@@ -23,8 +23,8 @@ final class AudioService: ObservationService {
 
     func activate() async throws {
         let session = AVAudioSession.sharedInstance()
-        print("[AudioDiag] AudioService.activate: switching to .record/.measurement (was cat=\(session.category.rawValue) mode=\(session.mode.rawValue))")
-        try session.setCategory(.record, mode: .measurement)
+        print("[AudioDiag] AudioService.activate: switching to .record/.default (was cat=\(session.category.rawValue) mode=\(session.mode.rawValue))")
+        try session.setCategory(.record, mode: .default)
         try session.setActive(true)
 
         let engine = AVAudioEngine()
