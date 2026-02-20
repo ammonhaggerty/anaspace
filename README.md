@@ -2,7 +2,7 @@
 
 **A cultural exploration engine for iOS, built entirely with Claude Code.**
 
-https://github.com/user-attachments/assets/6eb574d4-14ca-4cda-8c85-ce85a5897c07
+https://github.com/user-attachments/assets/6a8ffbe9-c2a1-448b-9131-2b0104d62dde
 
 ---
 
