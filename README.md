@@ -12,7 +12,7 @@ The app exists because algorithms have made music infinite and culture disposabl
 
 Anaspace is fully data sovereign: no sign-in, no data collection, no servers. The intent is to run entirely on device-side models, eliminating AI costs and ensuring the tool doesn't participate in the economic structures that shortchange artists. I wasn't able to finish local model integration for this hackathon, but I'm close — the plan is to release Anaspace as a free app with zero model cost. There is extraordinary music, art, and culture being forgotten every day, and this is a tool for finding it right where you are.
 
-**Note:** Running Anaspace on the Apple Foundation Model did not perform well enough, so for now I'm using Claude Haiku 4.6 and it will remain an open-source experiment. When Apple improves their internal model I will release this on the App Store as a free app. 
+**Note:** This branch (`feature/apple-foundation-models`) replaces Claude Haiku with Apple's on-device Foundation Models framework. The entire intelligence layer now runs locally — no API keys, no network calls, no data leaving the device. This is an experimental integration to evaluate quality, latency, and feasibility. See `.claude/foundation-models-integration.md` for the full technical approach.
 
 ---
 
@@ -162,7 +162,7 @@ ServiceManager (@Observable, @MainActor)
  │     └── SpeechService            On-device transcription
  ├── ShazamService             SHManagedSession (manages own mic)
  ├── MusicService              MusicKit catalog enrichment
- ├── ClaudeService             Culture map generation (Anthropic API)
+ ├── FoundationModelService    Culture map generation (on-device, 3-tier)
  ├── AudioPlayerService        AVAudioEngine playback, VU metering, queue management
  ├── MusicQueueBuilder         Contextual playlists from culture connections
  └── ObservationProgress       Phased lifecycle (idle → capturing → processing → resolved)
@@ -180,9 +180,9 @@ Haptics serve as a non-visual communication channel. The user can keep their pho
 
 ---
 
-## The Path to Data Sovereignty
+## Data Sovereignty: On-Device Intelligence
 
-The current build uses Claude's API for cultural knowledge synthesis. This works well but creates two problems: it costs money per query, and it sends observation data to a server. Both violate the project's core principles. The goal is to replace the cloud API with on-device language models — making Anaspace fully sovereign, fully free, and fully offline-capable.
+This branch achieves what the project always aimed for: the intelligence layer runs entirely on-device. No API calls, no server costs, no observation data leaving the phone. The 3B on-device model generates culture maps using a three-tier architecture — culture map generation with MusicKit and WikiData tool grounding, direct MusicKit playlist assembly, and on-demand entity detail loading — all within the 4,096 token-per-session budget.
 
 ### The On-Device Moment
 
@@ -196,23 +196,21 @@ This isn't a coincidence. More than a decade ago, I worked alongside [Blaise Ag�
 
 **Anaspace will ship on both platforms.** iOS via Apple Foundation Models, Android via Gemini Nano's Prompt API. Same architecture, same principles, same zero-cost model.
 
-### The Core Challenge: 4K Context
+### How It Works: Three-Tier Architecture
 
-The on-device models have constrained context windows — Apple's is 4,096 tokens including system instructions, prompt, and output combined. Anaspace's culture map queries are inherently rich: an artist's bio, their influences, genre history, geographic connections, temporal context. Fitting this into 4K tokens while preserving the quality of cultural insight is the central technical challenge.
+The 4,096 token budget (input + output combined per session) means the old single-call Claude approach won't fit. The solution decomposes generation into three tiers, each with a fresh `LanguageModelSession`:
 
-### The Strategy: Decomposed Micro-Queries
+**Tier 1: Culture Map (~850 tokens).** A session with MusicKit and WikiData tools generates the subject, 8 entities, narrative, and playlist artists. The model calls tools to verify facts and discover connections. Streams via `@Generable` `PartiallyGenerated` snapshots so the UI renders progressively.
 
-The approach draws directly from techniques I validated in another Foundation Models project ([AppleFoundationMatchMaker](https://github.com/ammonshepherd/AppleFoundationMatchMaker)), where I solved similar context constraints:
+**Tier 2: Playlist (zero tokens).** The existing `MusicQueueBuilder` uses entity names and year to build Apple Music preview queues directly. No model involvement.
 
-**Fresh sessions per query.** `LanguageModelSession` accumulates context across turns, quickly exceeding the token limit. The solution is to create a dedicated session for each independent query — clean context, predictable token budget, no accumulation.
+**Tier 3: Entity Details (~280 tokens each).** Fresh session per entity, no tools. Generates bio, description, and recommended song. Background preloads top 3 by relevance; rest load on-demand when the user taps. Cached per observation.
 
-**Aggressive prompt compression.** Instead of sending rich narrative context, distill each query to structured facts: artist name, genre, origin city, active years, known influences — as compact key-value pairs. The model narrates from facts rather than reasoning from scratch. Target: ~700-800 tokens per prompt, leaving ~500-800 tokens for output and a comfortable buffer.
-
-**Chained micro-queries instead of monolithic requests.** Rather than asking for a complete culture map in one call, decompose into focused queries that each fit comfortably in the context window: (1) narrate the connection between this artist and this place, (2) list 3 key influences as structured output, (3) describe this influence relationship in one sentence. Each query is small, grounded in provided facts, and the UI renders results progressively — which actually feels better than waiting for one large response.
-
-**Structured generation for reliability.** Foundation Models' `@Generable` types with `@Guide` annotations produce typed, parseable output — no JSON parsing failures, no prompt engineering to prevent markdown. The model returns exactly the data structure the UI expects.
-
-**The LLM narrates, it doesn't research.** This is the foundational principle. The on-device model doesn't need to know cultural history from its training data. It needs to take structured facts — pulled from MusicKit, Wikidata, Wikipedia extracts — and weave them into coherent, evocative micro-narratives. That's well within a small model's capability. The knowledge graph does the research; the LLM tells the story.
+**Key principles:**
+- **Fresh sessions per call** — no context accumulation (the #1 lesson from [AppleFoundationMatchMaker](https://github.com/ammonshepherd/AppleFoundationMatchMaker))
+- **`@Generable` structured generation** — constrained decoding guarantees valid Swift structs, no JSON parsing
+- **The model narrates, it doesn't research** — MusicKit and WikiData tools provide facts, the model weaves them into cultural context
+- **Aggressive token compression** — tool outputs truncated to 150-400 chars, plain text not JSON
 
 ### What This Means for Users
 
@@ -265,10 +263,10 @@ Implementation followed a structured pipeline: detailed plans broken into indepe
 | Haptics | CoreHaptics (`CHHapticEngine`) |
 | Music | MusicKit, AVAudioEngine (playback) |
 | Location | CoreLocation |
-| AI | Claude API (Anthropic) — transitioning to Apple Foundation Models + Gemini Nano |
+| AI | Apple Foundation Models (on-device) with MusicKit + WikiData tools |
 | State | `@Observable` (Swift Observation framework) |
 | Async | `async/await`, `TaskGroup`, `AsyncStream`, structured concurrency |
-| Target | iOS 17.0+ |
+| Target | iOS 26.0+ (A17 Pro+, Apple Intelligence required) |
 
 ---
 
@@ -293,7 +291,7 @@ anaspace/
     Audio/               AudioService hub, Shazam, SoundAnalysis, Speech
     Haptics/             CoreHaptics patterns
     Music/               MusicKit catalog, AudioPlayerService, MusicQueueBuilder
-    AI/                  Claude API integration
+    AI/                  Foundation Models service, @Generable types, MusicKit + WikiData tools
   Storage/               AppState, LocalStore (UserDefaults persistence)
 ```
 
@@ -303,24 +301,27 @@ anaspace/
 
 ### Prerequisites
 
-- Xcode 16+ (Swift 6.0)
-- iOS 17.0+ device (simulator works for UI, device required for Shazam/haptics)
+- Xcode 26+ (Swift 6.0)
+- iOS 26.0+ device with Apple Intelligence enabled (A17 Pro or later)
 - Mapbox account (for map display)
 
 ### Configuration
 
-1. Clone the repository
+1. Clone the repository and check out the branch:
+   ```bash
+   git checkout feature/apple-foundation-models
+   ```
 2. Copy the secrets template:
    ```bash
    cp Secrets.xcconfig.example Secrets.xcconfig
    ```
-3. Add your API keys to `Secrets.xcconfig`:
+3. Add your Mapbox token to `Secrets.xcconfig`:
    ```
    MAPBOX_TOKEN = your_mapbox_token_here
-   CLAUDE_API_KEY = your_claude_api_key_here
    ```
+   No Claude API key needed — the intelligence layer runs entirely on-device.
 4. Open `anaspace.xcodeproj` in Xcode
-5. Build and run
+5. Build and run on a physical device (Foundation Models requires hardware with Apple Intelligence)
 
 `Secrets.xcconfig` is gitignored. Never commit API keys.
 
