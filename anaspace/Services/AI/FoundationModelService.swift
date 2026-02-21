@@ -101,6 +101,15 @@ final class FoundationModelService: ObservationService {
         print("[FM MULTI-Q DIAGNOSTIC] Done.")
     }
 
+    #if DEBUG
+    func runPromptOptimization(timeLimitSeconds: TimeInterval = 300) async -> String {
+        let harness = PromptHarness { [weak self] question in
+            await self?.ask(question)
+        }
+        return await harness.run(timeLimitSeconds: timeLimitSeconds)
+    }
+    #endif
+
     func deactivate() {
         preloadTask?.cancel()
         preloadTask = nil
