@@ -501,7 +501,7 @@ final class ServiceManager {
     // MARK: - Shortcut Query
 
     /// Send a shortcut prompt to Claude using only location + date (no audio capture).
-    func queryShortcut(prompt: String) {
+    func queryShortcut(prompt: String, locationLabel: String = "", contextYear: Int = 0) {
         audioPlayer.beginFadeAndPrepareForCapture()
         cancelAllTasks()
         progress.reset()
@@ -522,7 +522,7 @@ final class ServiceManager {
                     resolve()
                     return
                 }
-                let result = try await claude.processShortcutQuery(prompt: prompt) { [weak self] partialResult in
+                let result = try await claude.processShortcutQuery(prompt: prompt, location: locationLabel, year: contextYear) { [weak self] partialResult in
                     self?.progress.setLatestResult(partialResult)
                 }
                 guard !Task.isCancelled else { return }

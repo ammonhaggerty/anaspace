@@ -117,7 +117,7 @@ final class ObservationProgress {
         isResultSuperseded = superseded
         resultVersion += 1
         if let result {
-            logEvent("Apple LLM result: \(result.subject) (streaming: \(result.isStreaming))")
+            logEvent("Apple LLM result: \(result.subject) (\(result.connections.count) entities, partial: \(result.isPartial))")
         }
     }
 

@@ -27,81 +27,288 @@ final class FoundationModelService: ObservationService {
         }
     }
 
+    // MARK: - Diagnostic
+
+    /// Run simple factual questions to test model knowledge. Check Xcode console.
+    func runDiagnostic() async {
+        print("[FM DIAGNOSTIC] Starting...")
+        let questions = [
+            "Which music artist FROM San Francisco was most popular in 1984? Answer with just the name.",
+            "Who is the most iconic music artist FROM San Francisco in 1984? Just the name.",
+            "Which music artist FROM San Francisco was most popular in 1968? Answer with just the name.",
+            "Who is the most iconic punk artist FROM London in 1977? Just the name.",
+            "Which musician FROM Detroit was most famous in 1965? Just the name.",
+            "Which musician FROM Seattle was most famous in 1992? Just the name.",
+        ]
+
+        let session = LanguageModelSession()
+        for question in questions {
+            do {
+                let response = try await session.respond(to: question)
+                print("[FM DIAGNOSTIC] Q: \(question)")
+                print("[FM DIAGNOSTIC] A: \(response.content)")
+                print()
+            } catch {
+                print("[FM DIAGNOSTIC] Q: \(question)")
+                print("[FM DIAGNOSTIC] ERROR: \(error)")
+                print()
+            }
+        }
+        print("[FM DIAGNOSTIC] Done.")
+    }
+
+    /// Test multi-question approach: subject + 8 entity questions, all plain text.
+    func runStructuredDiagnostic() async {
+        print("[FM MULTI-Q DIAGNOSTIC] Starting...")
+
+        struct TestCase {
+            let location: String
+            let year: Int
+        }
+        let tests = [
+            TestCase(location: "San Francisco", year: 1984),
+            TestCase(location: "San Francisco", year: 1968),
+            TestCase(location: "Detroit", year: 1965),
+            TestCase(location: "London", year: 1977),
+        ]
+
+        for test in tests {
+            let start = CFAbsoluteTimeGetCurrent()
+            print("[FM MULTI-Q DIAGNOSTIC] \(test.location) \(test.year):")
+
+            do {
+                var result: ClaudeResult?
+                _ = try await generateCultureMap(
+                    subjectQuestion: "Which music artist FROM \(test.location) was most popular in \(test.year)? Answer with just the name.",
+                    location: test.location,
+                    year: test.year
+                ) { r in result = r }
+
+                if let r = result {
+                    let elapsed = CFAbsoluteTimeGetCurrent() - start
+                    print("[FM MULTI-Q DIAGNOSTIC] Subject: \(r.subject)")
+                    print("[FM MULTI-Q DIAGNOSTIC] Entities: \(r.connections.map { "\($0.name) (\($0.entityType.rawValue))" }.joined(separator: ", "))")
+                    print("[FM MULTI-Q DIAGNOSTIC] Birth: \(r.birthInfo)")
+                    print("[FM MULTI-Q DIAGNOSTIC] Narrative: \(r.narrative)")
+                    print("[FM MULTI-Q DIAGNOSTIC] Total: \(String(format: "%.1f", elapsed))s")
+                }
+                print()
+            } catch {
+                print("[FM MULTI-Q DIAGNOSTIC] ERROR: \(error)")
+                print()
+            }
+        }
+        print("[FM MULTI-Q DIAGNOSTIC] Done.")
+    }
+
     func deactivate() {
         preloadTask?.cancel()
         preloadTask = nil
     }
 
-    // MARK: - Tier 1 Instructions
-
-    private let tier1Instructions = """
-        You are a cultural context engine. Given a subject, place, and year, build a culture map \
-        of 8 connected entities spanning music, art, events, venues, and movements. \
-        Each entity must connect to the subject in this specific place and time period. \
-        Use the searchMusic tool to verify artist names and discover related musicians. \
-        Use the searchWikiData tool to find cultural events, venues, and movements. \
-        Entity names must be ALL CAPS, max 20 characters. \
-        Entity types: collaborator, peer, influence, follower, creation, place, event, movement. \
-        Reserve relevance 0.9+ for direct collaborators only.
-        """
+    // MARK: - Instructions
 
     private let tier3Instructions = """
         Write a short bio and connection description for the given entity.
         """
 
-    // MARK: - Tier 1: Culture Map Generation
+    // MARK: - Entity Questions
 
-    private func generateCultureMap(
-        prompt: String,
-        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void
-    ) async throws -> ClaudeResult {
-        let start = CFAbsoluteTimeGetCurrent()
-        entityDetailCache.removeAll()
+    /// Each entity is resolved via a simple, explicit plain-text question.
+    /// The on-device model answers simple factual questions accurately (~7/7),
+    /// but hallucinates badly with @Generable structured generation.
+    private struct EntityQuestion {
+        let type: EntityType
+        let template: String
+        let relevance: Double
+    }
 
-        let session = LanguageModelSession(
-            tools: [MusicSearchTool(), WikiDataTool()],
-            instructions: tier1Instructions
-        )
+    private let entityQuestions: [EntityQuestion] = [
+        .init(type: .collaborator, template: "{subject}'s closest musical collaborator around {year}? Answer with ONLY the name.", relevance: 0.95),
+        .init(type: .peer, template: "A musical peer of {subject} in {place} around {year}? Answer with ONLY the name.", relevance: 0.8),
+        .init(type: .influence, template: "{subject}'s biggest musical influence? Answer with ONLY the name.", relevance: 0.7),
+        .init(type: .follower, template: "An artist most directly influenced by {subject}? Answer with ONLY the name.", relevance: 0.7),
+        .init(type: .creation, template: "{subject}'s most famous song or album around {year}? Answer with ONLY the title.", relevance: 0.85),
+        .init(type: .place, template: "The venue in {place} most associated with {subject}? Answer with ONLY the venue name.", relevance: 0.75),
+        .init(type: .event, template: "A major music event in {place} around {year} connected to {subject}? Answer with ONLY the event name.", relevance: 0.65),
+        .init(type: .movement, template: "The music genre or movement {subject} was part of in {year}? Answer with ONLY the genre name.", relevance: 0.6),
+    ]
 
-        let stream = session.streamResponse(
-            to: prompt,
-            generating: CultureMap.self
-        )
+    // MARK: - Plain-Text Q&A Helpers
 
-        var finalResult: ClaudeResult?
-        for try await partial in stream {
-            let partialResult = partial.content.toClaudeResult()
-            // Only emit updates once we have a subject
-            if partialResult.subject != "..." {
-                onUpdate(partialResult)
-                finalResult = partialResult
+    /// Ask a single plain-text question. Returns cleaned answer or nil on failure/refusal.
+    private func ask(_ question: String) async -> String? {
+        do {
+            let session = LanguageModelSession()
+            let response = try await session.respond(to: question)
+            let answer = cleanAnswer(response.content)
+            return answer
+        } catch {
+            print("[FM] Q&A error: \(error)")
+            return nil
+        }
+    }
+
+    /// Clean model response to extract just the name/answer.
+    private func cleanAnswer(_ raw: String) -> String? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Filter out guardrail refusals and chatbot disclaimers
+        let refusalPhrases = ["i can't assist", "i cannot", "i'm sorry", "as an ai", "i don't have"]
+        if refusalPhrases.contains(where: { text.lowercased().contains($0) }) {
+            return nil
+        }
+
+        // Strip trailing period
+        if text.hasSuffix(".") { text = String(text.dropLast()) }
+
+        // Strip quotes
+        text = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+
+        // If the answer contains "is" or "was" + name pattern, extract the name after it.
+        // e.g. "The most iconic artist from SF in 1968 is Janis Joplin" → "Janis Joplin"
+        // e.g. "Janis Joplin's biggest influence was Bessie Smith" → "Bessie Smith"
+        for separator in [" is ", " was ", " were ", " are "] {
+            if let range = text.range(of: separator, options: .backwards) {
+                let afterSep = String(text[range.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'."))
+                // Only use the extracted part if it's reasonably short (a name)
+                if !afterSep.isEmpty && afterSep.count < 60 {
+                    text = afterSep
+                    break
+                }
             }
         }
 
-        let elapsed = CFAbsoluteTimeGetCurrent() - start
-        print("[FM] Tier 1 completed in \(String(format: "%.2f", elapsed))s")
+        // Strip "The answer is" or similar preambles
+        let preambles = ["the answer is ", "that would be ", "it's ", "it is "]
+        for preamble in preambles {
+            if text.lowercased().hasPrefix(preamble) {
+                text = String(text.dropFirst(preamble.count))
+            }
+        }
 
-        guard var result = finalResult else {
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'."))
+        return text.isEmpty ? nil : text
+    }
+
+    /// Fill template placeholders with actual values.
+    private func fillTemplate(_ template: String, subject: String, place: String, year: Int) -> String {
+        template
+            .replacingOccurrences(of: "{subject}", with: subject)
+            .replacingOccurrences(of: "{place}", with: place)
+            .replacingOccurrences(of: "{year}", with: String(year))
+    }
+
+    // MARK: - Culture Map Generation (multi-question Q&A)
+
+    private func generateCultureMap(
+        subjectQuestion: String,
+        location: String,
+        year: Int,
+        knownSubject: String? = nil,
+        onUpdate: @MainActor @Sendable (ClaudeResult) -> Void
+    ) async throws -> ClaudeResult {
+        let start = CFAbsoluteTimeGetCurrent()
+
+        // Cancel any in-flight Tier 3 preloads — they compete for model inference
+        preloadTask?.cancel()
+        preloadTask = nil
+        entityDetailCache.removeAll()
+
+        // Phase 1: Resolve subject via plain text Q&A
+        let subject: String
+        if let known = knownSubject {
+            subject = known
+            print("[FM] Phase 1 skipped — subject: \(known)")
+        } else {
+            guard let resolved = await ask(subjectQuestion) else {
+                throw FoundationModelError.emptyResponse
+            }
+            subject = resolved
+            print("[FM] Phase 1 (\(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - start))s): \(subject)")
+        }
+
+        // Emit initial result with subject
+        var connections: [CultureConnection] = []
+        func emitUpdate(partial: Bool = true) {
+            let artistTypes: Set<EntityType> = [.collaborator, .peer, .influence, .follower]
+            let keyArtists = connections.filter { artistTypes.contains($0.entityType) }.map { $0.name }
+            let result = ClaudeResult(
+                subject: subject.uppercased(),
+                subjectType: "artist",
+                birthInfo: "",
+                place: location,
+                year: year,
+                bio: "",
+                narrative: "",
+                connections: connections,
+                keyArtists: keyArtists,
+                isPartial: partial
+            )
+            onUpdate(result)
+        }
+        emitUpdate()
+
+        // Phase 2: Ask entity questions (sequential — model serializes inference anyway)
+        let city = location.components(separatedBy: ",").first?
+            .trimmingCharacters(in: .whitespaces) ?? location
+
+        for q in entityQuestions {
+            let question = fillTemplate(q.template, subject: subject, place: city, year: year)
+            if let answer = await ask(question) {
+                let displayName = String(answer.prefix(20)).uppercased()
+                // Skip duplicates — model sometimes repeats answers
+                let isDuplicate = connections.contains { $0.name == displayName }
+                if isDuplicate {
+                    print("[FM] \(q.type.rawValue): \(displayName) (duplicate, skipped)")
+                } else {
+                    print("[FM] \(q.type.rawValue): \(displayName)")
+                    connections.append(CultureConnection(
+                        name: displayName,
+                        subtitle: nil,
+                        entityType: q.type,
+                        relationship: q.type.defaultRelationship(for: subject),
+                        relevance: q.relevance,
+                        description: "",
+                        recommendedSong: nil
+                    ))
+                    emitUpdate()
+                }
+            }
+        }
+
+        guard !connections.isEmpty else {
             throw FoundationModelError.emptyResponse
         }
 
-        // Mark as no longer streaming
-        result = ClaudeResult(
-            subject: result.subject,
-            subjectType: result.subjectType,
-            birthInfo: result.birthInfo,
-            place: result.place,
-            year: result.year,
-            bio: result.bio,
-            narrative: result.narrative,
-            connections: result.connections,
-            keyArtists: result.keyArtists,
-            isStreaming: false
+        // Phase 3: Get birth info and narrative
+        let birthInfo = await ask("When was \(subject) born and where? Format: 'B. 1947, LONDON'. Just that.") ?? ""
+        let narrative = await ask("\(subject) in \(city), \(year). One sentence about why. Just the sentence.") ?? ""
+
+        // Final result
+        let artistTypes: Set<EntityType> = [.collaborator, .peer, .influence, .follower]
+        let keyArtists = connections.filter { artistTypes.contains($0.entityType) }.map { $0.name }
+        let result = ClaudeResult(
+            subject: subject.uppercased(),
+            subjectType: "artist",
+            birthInfo: birthInfo,
+            place: location,
+            year: year,
+            bio: "",
+            narrative: narrative,
+            connections: connections,
+            keyArtists: keyArtists,
+            isPartial: false
         )
+        onUpdate(result)
 
-        // Kick off background entity detail preloading
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        print("[FM] Culture map completed in \(String(format: "%.1f", elapsed))s (\(connections.count) entities)")
+
         preloadEntityDetails(for: result)
-
         return result
     }
 
@@ -118,6 +325,7 @@ final class FoundationModelService: ObservationService {
             await withTaskGroup(of: Void.self) { group in
                 for entity in top3 {
                     group.addTask {
+                        guard !Task.isCancelled else { return }
                         await self.loadEntityDetail(
                             name: entity.name,
                             entityType: entity.entityType.rawValue,
@@ -172,77 +380,38 @@ final class FoundationModelService: ObservationService {
         )
     }
 
-    // MARK: - Prompt Builders
-
-    private func buildObservationPrompt(from signals: ObservationSignals) -> String {
-        var parts: [String] = []
-
-        if let shazam = signals.shazamResult {
-            parts.append("Music identified: \(shazam.title) by \(shazam.artist) (\(shazam.releaseYear ?? 0))")
-            if let genre = shazam.genres.first { parts.append("Genre: \(genre)") }
-        }
-
-        if let transcript = signals.transcript {
-            parts.append("User said: \"\(transcript.text)\"")
-        }
-
-        if let loc = signals.location {
-            let label = [loc.city, loc.state, loc.country].compactMap { $0 }.joined(separator: ", ")
-            parts.append("Location: \(label)")
-        }
-
-        // Include active triad context if available
-        if let activeSubject = signals.activeSubject {
-            parts.append("Current subject: \(activeSubject)")
-        }
-        if let activeYear = signals.activeYear {
-            parts.append("Current year: \(activeYear)")
-        }
-
-        parts.append("Build the culture map.")
-        return parts.joined(separator: "\n")
-    }
-
-    private func buildSubjectChangePrompt(
-        connection: CultureConnection?, newSubject: String, priorSubject: String,
-        location: String, year: Int
-    ) -> String {
-        var prompt = "Change subject from \(priorSubject) to \(newSubject)."
-        if let conn = connection {
-            prompt += " Type: \(conn.entityType.rawValue). Relationship: \(conn.relationship)."
-        }
-        prompt += "\nLocation: \(location). Year: \(year)."
-        prompt += "\nInclude \(priorSubject) as a connection."
-        prompt += "\nBuild the culture map for \(newSubject)."
-        return prompt
-    }
-
-    private func buildYearChangePrompt(subject: String, year: Int, location: String) -> String {
-        """
-        Subject: \(subject). Location: \(location). Year changed to \(year).
-        Find the artist or musician most connected to \(subject)'s legacy who was active \
-        in \(location) in \(year). The subject may change. Build the culture map.
-        """
-    }
-
-    private func buildLocationChangePrompt(
-        subject: String, subjectType: String, year: Int, location: String
-    ) -> String {
-        """
-        Subject: \(subject) (\(subjectType)). Year: \(year). Location changed to \(location).
-        Find the closest cultural analog from \(location). New subject must be FROM or \
-        synonymous with \(location). Build the culture map.
-        """
-    }
-
-    // MARK: - 5 Query Types (ClaudeService-compatible API)
+    // MARK: - 5 Query Types
 
     func processObservation(
         from signals: ObservationSignals,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        let prompt = buildObservationPrompt(from: signals)
-        return try await generateCultureMap(prompt: prompt, onUpdate: onUpdate)
+        let loc = signals.location
+        let location = [loc?.city, loc?.state, loc?.country].compactMap { $0 }.joined(separator: ", ")
+        let year = signals.activeYear ?? Calendar.current.component(.year, from: .now)
+
+        // Build Phase 1 question from signals
+        let subjectQuestion: String
+        var knownSubject: String? = nil
+
+        if let transcript = signals.transcript {
+            // Voice request — the transcript IS the subject query
+            subjectQuestion = "\(transcript.text). Which music artist is most relevant? Answer with just the name."
+        } else if let shazam = signals.shazamResult {
+            // Shazam match — the artist is the subject
+            knownSubject = shazam.artist
+            subjectQuestion = "" // Won't be used
+        } else if let active = signals.activeSubject {
+            knownSubject = active
+            subjectQuestion = ""
+        } else {
+            subjectQuestion = "Which music artist FROM \(location) was most popular in \(year)? Answer with just the name."
+        }
+
+        return try await generateCultureMap(
+            subjectQuestion: subjectQuestion, location: location, year: year,
+            knownSubject: knownSubject, onUpdate: onUpdate
+        )
     }
 
     func processSubjectChange(
@@ -250,36 +419,42 @@ final class FoundationModelService: ObservationService {
         location: String, year: Int,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        let prompt = buildSubjectChangePrompt(
-            connection: connection, newSubject: newSubject, priorSubject: priorSubject,
-            location: location, year: year
+        // Subject is already known — user clicked on an entity
+        return try await generateCultureMap(
+            subjectQuestion: "", location: location, year: year,
+            knownSubject: newSubject, onUpdate: onUpdate
         )
-        return try await generateCultureMap(prompt: prompt, onUpdate: onUpdate)
     }
 
     func processYearChange(
         subject: String, year: Int, location: String,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        let prompt = buildYearChangePrompt(subject: subject, year: year, location: location)
-        return try await generateCultureMap(prompt: prompt, onUpdate: onUpdate)
+        let question = "Who is the music artist most connected to \(subject)'s legacy in \(location) in \(year)? Just the name."
+        return try await generateCultureMap(
+            subjectQuestion: question, location: location, year: year, onUpdate: onUpdate
+        )
     }
 
     func processLocationChange(
         subject: String, subjectType: String, year: Int, location: String,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        let prompt = buildLocationChangePrompt(
-            subject: subject, subjectType: subjectType, year: year, location: location
+        let question = "Who is the closest cultural analog to \(subject) FROM \(location)? Just the name."
+        return try await generateCultureMap(
+            subjectQuestion: question, location: location, year: year, onUpdate: onUpdate
         )
-        return try await generateCultureMap(prompt: prompt, onUpdate: onUpdate)
     }
 
     func processShortcutQuery(
-        prompt: String,
+        prompt: String, location: String = "", year: Int = 0,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        return try await generateCultureMap(prompt: prompt, onUpdate: onUpdate)
+        // Prompt is already a simple, direct question — pass through as-is
+        let resolvedYear = year > 0 ? year : Calendar.current.component(.year, from: .now)
+        return try await generateCultureMap(
+            subjectQuestion: prompt, location: location, year: resolvedYear, onUpdate: onUpdate
+        )
     }
 
     // MARK: - Fallback
@@ -295,7 +470,7 @@ final class FoundationModelService: ObservationService {
             narrative: "",
             connections: [],
             keyArtists: [],
-            isStreaming: false
+            isPartial: false
         )
     }
 }

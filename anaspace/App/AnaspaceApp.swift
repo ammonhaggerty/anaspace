@@ -42,7 +42,7 @@ struct ContentView: View {
     @State private var activeHistoryEntryId: UUID?
     @State private var usedCircaYears: Set<Int> = []
     @State private var contextChangeSnapshot: ContextChangeSnapshot?
-    @State private var streamingExitInitiated = false
+    @State private var captureExitInitiated = false
 
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
@@ -545,7 +545,7 @@ struct ContentView: View {
                    serviceManager.progress.mode == .tap,
                    serviceManager.progress.shazamResult == nil {
                     homeRenderer?.showNothingObserved = true
-                    if controller.isCapturing && !streamingExitInitiated {
+                    if controller.isCapturing && !captureExitInitiated {
                         controller.exitCapture { grid in
                             populateGrid(grid)
                         }
@@ -554,7 +554,7 @@ struct ContentView: View {
                     }
                 } else {
                     handleResultUpdate(saveToHistory: true)
-                    if controller.isCapturing && !streamingExitInitiated {
+                    if controller.isCapturing && !captureExitInitiated {
                         controller.exitCapture { grid in
                             populateGrid(grid)
                         }
@@ -731,7 +731,7 @@ struct ContentView: View {
         serviceManager.activeYear = selectedYear
         serviceManager.activeLocationLabel = home.locationLabel
 
-        // Save to history only on final resolution (not streaming updates)
+        // Save to history only on final resolution (not partial updates)
         if saveToHistory {
             if let activeId = activeHistoryEntryId {
                 historyStore.promote(activeId)
@@ -751,13 +751,12 @@ struct ContentView: View {
         }
 
         if controller.isCapturing {
-            // Wait until all entity names are captured before exiting capture.
-            // Descriptions, playlist info, and details stream in after the map is visible.
+            // Wait until all entity names are resolved before exiting capture.
             // Guard: only call exitCapture once per capture cycle.
-            if !streamingExitInitiated {
+            if !captureExitInitiated {
                 let hasAllEntities = result.connections.count >= 8
-                if hasAllEntities || !result.isStreaming {
-                    streamingExitInitiated = true
+                if hasAllEntities || !result.isPartial {
+                    captureExitInitiated = true
                     // Fade out old music when context change map appears;
                     // new playlist loads silently and fades in via transitionToStream.
                     if controller.isContextChangeCapture {
@@ -772,7 +771,7 @@ struct ContentView: View {
                 }
             }
         } else {
-            streamingExitInitiated = false
+            captureExitInitiated = false
             refreshGrid()
         }
     }
@@ -803,6 +802,18 @@ struct ContentView: View {
         }
 
         navigateTo(.info)
+
+        // Fetch Tier 3 entity detail (may already be cached from preload)
+        if let result = serviceManager.progress.latestResult {
+            Task {
+                if let detail = await serviceManager.claude.getEntityDetail(
+                    for: connection, subject: result.subject,
+                    place: result.place, year: result.year
+                ) {
+                    info.entityDescription = detail.description
+                }
+            }
+        }
     }
 
     private func resetToObservePage() {
@@ -1127,43 +1138,36 @@ struct ContentView: View {
             locationLabel = homeRenderer?.locationLabel ?? "UNKNOWN"
         }
 
-        let currentDate = Date().formatted(date: .long, time: .omitted)
         let circaYear = homeRenderer?.circaYear ?? 1975
 
         let prompt: String
         let title: String
         var contextYear: Int? = nil
 
+        // NOTE: On-device model (~3B params) needs short, direct questions.
+        // Complex multi-sentence prompts cause hallucination.
         switch index {
         case 0:
             // WHAT'S HOT / RIGHT HERE — implies current year
             title = "WHAT'S HOT RIGHT HERE"
             contextYear = Calendar.current.component(.year, from: Date())
-            prompt = """
-            The user is at \(locationLabel) on \(currentDate). Who is the most culturally relevant music artist connected to this place right now? Focus on artists who are currently active, trending, or have a deep cultural resonance with this specific location today. The year should be the current year.
-            """
+            prompt = "Which music artist FROM \(locationLabel) is most popular right now? Answer with just the name."
 
         case 1:
             // WHO SHAPED / THIS PLACE
             title = "WHO SHAPED THIS PLACE"
-            prompt = """
-            The user is at \(locationLabel). Who is the single most culturally influential music artist or creator whose legacy is inseparable from this place? Focus on the artist who most defined the cultural identity of this location. The year should be their peak era of influence.
-            """
+            prompt = "Which music artist FROM \(locationLabel) was most influential? Answer with just the name."
 
         case 2:
             // THIS SPOT / CIRCA {YEAR}
             title = "THIS SPOT CIRCA \(circaYear)"
             contextYear = circaYear
-            prompt = """
-            The user is at \(locationLabel). The year is \(circaYear). Who was the most culturally significant music artist or creator connected to this place during this era? Focus on the artist who best represents the cultural moment of this location at that time. The year should be \(circaYear).
-            """
+            prompt = "Which music artist FROM \(locationLabel) was most popular in \(circaYear)? Answer with just the name."
 
         case 3:
             // WORDS THAT / MADE SONGS
             title = "WORDS THAT MADE SONGS"
-            prompt = """
-            The user is at \(locationLabel). Find the most significant poet, writer, or literary figure whose words directly influenced or became music connected to this place. Focus on the literary-to-music bridge — someone whose writing was adapted, sampled, or deeply influenced songwriting in this location's musical tradition. The year should reflect their peak period of influence on music.
-            """
+            prompt = "Which poet or writer FROM \(locationLabel) most influenced music? Answer with just the name."
 
         default:
             return
@@ -1171,7 +1175,7 @@ struct ContentView: View {
 
         // Enter capture/evaluation flow
         navManager.resetToHome()
-        serviceManager.queryShortcut(prompt: prompt)
+        serviceManager.queryShortcut(prompt: prompt, locationLabel: locationLabel, contextYear: contextYear ?? 0)
         controller.enterCapture(
             mode: .observing,
             progress: serviceManager.progress,

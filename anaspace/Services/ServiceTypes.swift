@@ -164,6 +164,20 @@ enum EntityType: String, Codable, Sendable {
         case .creation, .place, .event, .movement: return false
         }
     }
+
+    /// Default relationship description for this entity type.
+    func defaultRelationship(for subject: String) -> String {
+        switch self {
+        case .collaborator: return "Close collaborator of \(subject)"
+        case .peer:         return "Musical peer of \(subject)"
+        case .influence:    return "Key influence on \(subject)"
+        case .follower:     return "Influenced by \(subject)"
+        case .creation:     return "Notable work by \(subject)"
+        case .place:        return "Venue associated with \(subject)"
+        case .event:        return "Event connected to \(subject)"
+        case .movement:     return "Movement encompassing \(subject)"
+        }
+    }
 }
 
 // MARK: - Culture Connection
@@ -190,9 +204,9 @@ struct ClaudeResult: Codable, Sendable {
     let narrative: String
     let connections: [CultureConnection]
     let keyArtists: [String]
-    let isStreaming: Bool
+    let isPartial: Bool
 
-    init(subject: String, subjectType: String, birthInfo: String, place: String, year: Int, bio: String, narrative: String, connections: [CultureConnection], keyArtists: [String] = [], isStreaming: Bool) {
+    init(subject: String, subjectType: String, birthInfo: String, place: String, year: Int, bio: String, narrative: String, connections: [CultureConnection], keyArtists: [String] = [], isPartial: Bool) {
         self.subject = subject
         self.subjectType = subjectType
         self.birthInfo = birthInfo
@@ -202,7 +216,7 @@ struct ClaudeResult: Codable, Sendable {
         self.narrative = narrative
         self.connections = connections
         self.keyArtists = keyArtists
-        self.isStreaming = isStreaming
+        self.isPartial = isPartial
     }
 
     init(from decoder: Decoder) throws {
@@ -216,7 +230,7 @@ struct ClaudeResult: Codable, Sendable {
         narrative = try c.decode(String.self, forKey: .narrative)
         connections = try c.decode([CultureConnection].self, forKey: .connections)
         keyArtists = try c.decodeIfPresent([String].self, forKey: .keyArtists) ?? []
-        isStreaming = try c.decode(Bool.self, forKey: .isStreaming)
+        isPartial = try c.decodeIfPresent(Bool.self, forKey: .isPartial) ?? false
     }
 }
 

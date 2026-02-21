@@ -65,7 +65,7 @@ struct EntityDetail {
 
 extension CultureMap {
     /// Convert a fully generated CultureMap to a ClaudeResult for downstream compatibility.
-    func toClaudeResult(isStreaming: Bool = false) -> ClaudeResult {
+    func toClaudeResult(isPartial: Bool = false) -> ClaudeResult {
         let connections = entities.map { entity in
             CultureConnection(
                 name: entity.name,
@@ -88,13 +88,13 @@ extension CultureMap {
             narrative: narrative,
             connections: connections,
             keyArtists: keyArtists,
-            isStreaming: isStreaming
+            isPartial: isPartial
         )
     }
 }
 
 extension CultureMap.PartiallyGenerated {
-    /// Convert a partially generated CultureMap to a streaming ClaudeResult.
+    /// Convert a partially generated CultureMap to a partial ClaudeResult.
     func toClaudeResult() -> ClaudeResult {
         let connections = (entities ?? []).compactMap { partial -> CultureConnection? in
             guard let name = partial.name, !name.isEmpty else { return nil }
@@ -119,7 +119,7 @@ extension CultureMap.PartiallyGenerated {
             narrative: narrative ?? "",
             connections: connections,
             keyArtists: keyArtists ?? [],
-            isStreaming: true
+            isPartial: true
         )
     }
 }

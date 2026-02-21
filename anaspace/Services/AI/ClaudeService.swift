@@ -621,7 +621,7 @@ final class ClaudeService: ObservationService {
 
             if shouldParse {
                 lastParseLength = bufLen
-                let partial = parseClaudeResponse(textBuffer, isStreaming: true)
+                let partial = parseClaudeResponse(textBuffer, isPartial: true)
                 if partial.subject != "Observation" {
                     onUpdate(partial)
                 }
@@ -630,7 +630,7 @@ final class ClaudeService: ObservationService {
 
         // Final authoritative parse
         print("[Claude] Stream complete, buffer: \(textBuffer.count) chars")
-        let finalResult = parseClaudeResponse(textBuffer, isStreaming: false)
+        let finalResult = parseClaudeResponse(textBuffer, isPartial: false)
         print("[Claude] Response: \(textBuffer.prefix(200))")
         return finalResult
     }
@@ -651,11 +651,11 @@ final class ClaudeService: ObservationService {
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func parseClaudeResponse(_ text: String, isStreaming: Bool = false) -> ClaudeResult {
+    private func parseClaudeResponse(_ text: String, isPartial: Bool = false) -> ClaudeResult {
         let cleaned = stripCodeFences(text)
 
         guard let data = cleaned.data(using: .utf8) else {
-            if !isStreaming {
+            if !isPartial {
                 print("[Claude] PARSE FAIL: could not convert to UTF-8 data")
                 print("[Claude] Raw text (\(text.count) chars): \(text.prefix(500))")
             }
@@ -664,21 +664,21 @@ final class ClaudeService: ObservationService {
 
         // Try parsing as-is first
         if let json = tryParseJSON(data) {
-            return buildResult(from: json, rawText: text, isStreaming: isStreaming)
+            return buildResult(from: json, rawText: text, isPartial: isPartial)
         }
 
         // Attempt to repair truncated JSON
-        if !isStreaming {
+        if !isPartial {
             print("[Claude] Initial parse failed, attempting JSON repair (\(cleaned.count) chars)")
         }
         if let repaired = repairTruncatedJSON(cleaned),
            let repairedData = repaired.data(using: .utf8),
            let json = tryParseJSON(repairedData) {
-            if !isStreaming { print("[Claude] JSON repair succeeded") }
-            return buildResult(from: json, rawText: text, isStreaming: isStreaming)
+            if !isPartial { print("[Claude] JSON repair succeeded") }
+            return buildResult(from: json, rawText: text, isPartial: isPartial)
         }
 
-        if !isStreaming {
+        if !isPartial {
             print("[Claude] PARSE FAIL: JSON repair also failed")
             print("[Claude] Cleaned text (\(cleaned.count) chars): \(cleaned.prefix(500))")
         }
@@ -689,7 +689,7 @@ final class ClaudeService: ObservationService {
         try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    private func buildResult(from json: [String: Any], rawText: String, isStreaming: Bool = false) -> ClaudeResult {
+    private func buildResult(from json: [String: Any], rawText: String, isPartial: Bool = false) -> ClaudeResult {
         let descriptions = json["entityDescriptions"] as? [[String: Any]]
         let result = ClaudeResult(
             subject: json["subject"] as? String ?? "Unknown",
@@ -701,9 +701,9 @@ final class ClaudeService: ObservationService {
             narrative: json["narrative"] as? String ?? rawText,
             connections: parseEntities(json["entities"], descriptions: descriptions),
             keyArtists: (json["keyArtists"] as? [String]) ?? [],
-            isStreaming: isStreaming
+            isPartial: isPartial
         )
-        if !isStreaming {
+        if !isPartial {
             print("[Claude] Parsed OK: subject=\(result.subject), place=\(result.place), year=\(result.year), entities=\(result.connections.count)")
         }
         return result
@@ -802,7 +802,7 @@ final class ClaudeService: ObservationService {
             narrative: text,
             connections: [],
             keyArtists: [],
-            isStreaming: false
+            isPartial: false
         )
     }
 
