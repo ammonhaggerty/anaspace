@@ -44,6 +44,11 @@ struct ContentView: View {
     @State private var contextChangeSnapshot: ContextChangeSnapshot?
     @State private var captureExitInitiated = false
 
+    #if DEBUG
+    @State private var harnessReport: String?
+    @State private var isHarnessRunning = false
+    #endif
+
     // Page renderers
     @State private var renderers: [Page: any PageRenderer] = [
         .home: HomePageRenderer(),
@@ -492,6 +497,17 @@ struct ContentView: View {
             serviceManager.appState = appState
             await serviceManager.refreshPermissions()
             onboardingRenderer.permissions = serviceManager.permissions
+
+            #if DEBUG
+            // Prompt optimization harness — check Xcode console for progress
+            Task {
+                isHarnessRunning = true
+                try? await serviceManager.claude.activate()
+                let report = await serviceManager.claude.runPromptOptimization(timeLimitSeconds: 300)
+                harnessReport = report
+                isHarnessRunning = false
+            }
+            #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Re-check permissions when returning from Settings
@@ -589,6 +605,39 @@ struct ContentView: View {
                 onDismiss: { showYearPicker = false }
             )
         }
+        #if DEBUG
+        .overlay(alignment: .topTrailing) {
+            if isHarnessRunning {
+                Text("HARNESS RUNNING...")
+                    .font(.caption.bold())
+                    .foregroundStyle(.white)
+                    .padding(8)
+                    .background(.red.opacity(0.8), in: RoundedRectangle(cornerRadius: 6))
+                    .padding()
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { harnessReport != nil },
+            set: { if !$0 { harnessReport = nil } }
+        )) {
+            if let report = harnessReport {
+                NavigationStack {
+                    ScrollView {
+                        Text(report)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding()
+                    }
+                    .navigationTitle("Prompt Optimization Report")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { harnessReport = nil }
+                        }
+                    }
+                }
+            }
+        }
+        #endif
     }
 
     // MARK: - Component Layer
