@@ -73,7 +73,7 @@ final class ObservationProgress {
 
     func setClaudeProcessing(_ processing: Bool) {
         isClaudeProcessing = processing
-        logEvent("Claude: \(processing ? "processing" : "done")")
+        logEvent("Apple LLM: \(processing ? "processing" : "done")")
     }
 
     func startCaptureTiming() {
@@ -117,13 +117,13 @@ final class ObservationProgress {
         isResultSuperseded = superseded
         resultVersion += 1
         if let result {
-            logEvent("Claude result: \(result.subject) (streaming: \(result.isStreaming))")
+            logEvent("Apple LLM result: \(result.subject) (streaming: \(result.isStreaming))")
         }
     }
 
     func markResultSuperseded() {
         isResultSuperseded = true
-        logEvent("Result superseded by new Claude request")
+        logEvent("Result superseded by new Apple LLM request")
     }
 
     func reset() {

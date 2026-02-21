@@ -49,15 +49,15 @@ struct CultureEntity {
 
 // MARK: - Tier 3: Entity Detail
 
-@Generable(description: "Detailed information about a culture map entity")
+@Generable(description: "Brief entity info")
 struct EntityDetail {
-    @Guide(description: "2 paragraph bio grounded in the specific year and place, 300-400 characters")
+    @Guide(description: "2-3 sentence bio, grounded in place and year")
     var bio: String
 
-    @Guide(description: "200-300 characters explaining specific connection to the subject")
+    @Guide(description: "1-2 sentences on connection to the subject")
     var description: String
 
-    @Guide(description: "A song title by or associated with this entity, or empty string if none")
+    @Guide(description: "A song title or empty string")
     var recommendedSong: String
 }
 

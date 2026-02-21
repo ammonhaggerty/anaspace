@@ -46,10 +46,7 @@ final class FoundationModelService: ObservationService {
         """
 
     private let tier3Instructions = """
-        You are a cultural context engine. Write a bio and description for the given entity, \
-        grounded in the specific place and year provided. Bio should be 2 paragraphs, \
-        300-400 characters. Description should explain the specific connection to the subject, \
-        200-300 characters.
+        Write a short bio and connection description for the given entity.
         """
 
     // MARK: - Tier 1: Culture Map Generation
@@ -142,11 +139,7 @@ final class FoundationModelService: ObservationService {
     ) async -> EntityDetail? {
         if let cached = entityDetailCache[name] { return cached }
 
-        let prompt = """
-            Entity: \(name) (\(entityType))
-            Connection to \(subject): \(relationship)
-            Place: \(place), Year: \(year)
-            """
+        let prompt = "\(name) (\(entityType)), \(place) \(year). Connection to \(subject): \(relationship)"
 
         do {
             let start = CFAbsoluteTimeGetCurrent()

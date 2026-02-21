@@ -373,7 +373,7 @@ final class ServiceManager {
                         guard !Task.isCancelled else { return }
                         progress.setLatestResult(result, superseded: false)
                     } catch {
-                        progress.logEvent("Claude error (late Shazam): \(error)")
+                        progress.logEvent("Apple LLM error (late Shazam): \(error)")
                     }
                     progress.setClaudeProcessing(false)
                     resolve()
