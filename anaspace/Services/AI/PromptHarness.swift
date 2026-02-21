@@ -1,3 +1,4 @@
+#if DEBUG
 import Foundation
 
 // MARK: - Prompt Harness Data Model
@@ -136,7 +137,7 @@ struct HarnessSeedData {
         "Kingston", "Havana"
     ]
 
-    /// 10 years spanning 1926-2026
+    /// 10 years spanning 1932-2020
     static let years = [1932, 1947, 1955, 1965, 1973, 1977, 1984, 1992, 2005, 2020]
 
     /// Seed location/year combos for the first round (5 diverse pairs)
@@ -152,11 +153,14 @@ struct HarnessSeedData {
     /// Keyed by question type. Use {subject}, {place}, {year} placeholders.
     static let baselineTemplates: [(questionType: String, template: String)] = [
         ("subject", "Which music artist FROM {place} was most popular in {year}? Answer with just the name."),
-        ("influence", "{subject}'s biggest musical influence? Answer with ONLY the name."),
+        ("collaborator", "{subject}'s closest musical collaborator around {year}? Answer with ONLY the name."),
         ("peer", "A musical peer of {subject} in {place} around {year}? Answer with ONLY the name."),
+        ("influence", "{subject}'s biggest musical influence? Answer with ONLY the name."),
         ("follower", "An artist most directly influenced by {subject}? Answer with ONLY the name."),
-        ("event", "A major music event in {place} around {year} connected to {subject}? Answer with ONLY the event name."),
         ("creation", "{subject}'s most famous song or album around {year}? Answer with ONLY the title."),
+        ("place", "The venue in {place} most associated with {subject}? Answer with ONLY the venue name."),
+        ("event", "A major music event in {place} around {year} connected to {subject}? Answer with ONLY the event name."),
         ("movement", "The music genre or movement {subject} was part of in {year}? Answer with ONLY the genre name."),
     ]
 }
+#endif
