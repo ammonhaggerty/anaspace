@@ -133,14 +133,14 @@ final class FoundationModelService: ObservationService {
     }
 
     private let entityQuestions: [EntityQuestion] = [
-        .init(type: .collaborator, template: "{subject}'s closest musical collaborator around {year}? Answer with ONLY the name.", relevance: 0.95),
-        .init(type: .peer, template: "A musical peer of {subject} in {place} around {year}? Answer with ONLY the name.", relevance: 0.8),
-        .init(type: .influence, template: "{subject}'s biggest musical influence? Answer with ONLY the name.", relevance: 0.7),
-        .init(type: .follower, template: "An artist most directly influenced by {subject}? Answer with ONLY the name.", relevance: 0.7),
-        .init(type: .creation, template: "{subject}'s most famous song or album around {year}? Answer with ONLY the title.", relevance: 0.85),
-        .init(type: .place, template: "The venue in {place} most associated with {subject}? Answer with ONLY the venue name.", relevance: 0.75),
-        .init(type: .event, template: "A major music event in {place} around {year} connected to {subject}? Answer with ONLY the event name.", relevance: 0.65),
-        .init(type: .movement, template: "The music genre or movement {subject} was part of in {year}? Answer with ONLY the genre name.", relevance: 0.6),
+        .init(type: .collaborator, template: "Who did {subject} frequently work with?", relevance: 0.95),
+        .init(type: .peer, template: "Name another musician similar to {subject}.", relevance: 0.8),
+        .init(type: .influence, template: "Who influenced {subject}?", relevance: 0.7),
+        .init(type: .follower, template: "Name a musician influenced by {subject}.", relevance: 0.7),
+        .init(type: .creation, template: "What is {subject}'s most famous song?", relevance: 0.85),
+        .init(type: .place, template: "Name the most famous concert venue in {place}.", relevance: 0.75),
+        .init(type: .event, template: "Name a music festival held in {place}.", relevance: 0.65),
+        .init(type: .movement, template: "What music genre is {subject} known for?", relevance: 0.6),
     ]
 
     // MARK: - Plain-Text Q&A Helpers
@@ -203,12 +203,19 @@ final class FoundationModelService: ObservationService {
         return text.isEmpty ? nil : text
     }
 
+    /// Convert exact year to decade string: 1977 → "the 1970s"
+    private func decadeString(for year: Int) -> String {
+        let decade = (year / 10) * 10
+        return "the \(decade)s"
+    }
+
     /// Fill template placeholders with actual values.
     private func fillTemplate(_ template: String, subject: String, place: String, year: Int) -> String {
         template
             .replacingOccurrences(of: "{subject}", with: subject)
             .replacingOccurrences(of: "{place}", with: place)
             .replacingOccurrences(of: "{year}", with: String(year))
+            .replacingOccurrences(of: "{decade}", with: decadeString(for: year))
     }
 
     // MARK: - Culture Map Generation (multi-question Q&A)
@@ -414,7 +421,7 @@ final class FoundationModelService: ObservationService {
             knownSubject = active
             subjectQuestion = ""
         } else {
-            subjectQuestion = "Which music artist FROM \(location) was most popular in \(year)? Answer with just the name."
+            subjectQuestion = "Name a famous \(decadeString(for: year)) musician from \(location)."
         }
 
         return try await generateCultureMap(
@@ -439,7 +446,8 @@ final class FoundationModelService: ObservationService {
         subject: String, year: Int, location: String,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        let question = "Who is the music artist most connected to \(subject)'s legacy in \(location) in \(year)? Just the name."
+        let city = location.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? location
+        let question = "Who is the closest cultural match to \(subject) from \(city) in \(decadeString(for: year))?"
         return try await generateCultureMap(
             subjectQuestion: question, location: location, year: year, onUpdate: onUpdate
         )
