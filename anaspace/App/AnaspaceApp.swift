@@ -498,16 +498,16 @@ struct ContentView: View {
             await serviceManager.refreshPermissions()
             onboardingRenderer.permissions = serviceManager.permissions
 
-            #if DEBUG
-            // Prompt optimization harness — check Xcode console for progress
-            Task {
-                isHarnessRunning = true
-                try? await serviceManager.claude.activate()
-                let report = await serviceManager.claude.runPromptOptimization(timeLimitSeconds: 300)
-                harnessReport = report
-                isHarnessRunning = false
-            }
-            #endif
+            // Prompt optimization harness — disabled, uncomment to run:
+            // #if DEBUG
+            // Task {
+            //     isHarnessRunning = true
+            //     try? await serviceManager.claude.activate()
+            //     let report = await serviceManager.claude.runPromptOptimization(timeLimitSeconds: 300)
+            //     harnessReport = report
+            //     isHarnessRunning = false
+            // }
+            // #endif
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             // Re-check permissions when returning from Settings

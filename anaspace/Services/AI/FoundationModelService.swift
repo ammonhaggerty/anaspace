@@ -136,14 +136,14 @@ final class FoundationModelService: ObservationService {
     }
 
     private let entityQuestions: [EntityQuestion] = [
-        .init(type: .collaborator, template: "Who did {subject} frequently work with?", relevance: 0.95),
-        .init(type: .peer, template: "Name another musician similar to {subject}.", relevance: 0.8),
-        .init(type: .influence, template: "Who influenced {subject}?", relevance: 0.7),
-        .init(type: .follower, template: "Name a musician influenced by {subject}.", relevance: 0.7),
-        .init(type: .creation, template: "What is {subject}'s most famous song?", relevance: 0.85),
-        .init(type: .place, template: "Name the most famous concert venue in {place}.", relevance: 0.75),
-        .init(type: .event, template: "Name a music festival held in {place}.", relevance: 0.65),
-        .init(type: .movement, template: "What music genre is {subject} known for?", relevance: 0.6),
+        .init(type: .collaborator, template: "{subject}'s closest musical collaborator in {decade}? Answer with ONLY the name.", relevance: 0.95),
+        .init(type: .peer, template: "A musical peer of {subject} in {place} in {decade}? Answer with ONLY the name.", relevance: 0.8),
+        .init(type: .influence, template: "{subject}'s biggest musical influence? Answer with ONLY the name.", relevance: 0.7),
+        .init(type: .follower, template: "An artist most directly influenced by {subject}? Answer with ONLY the name.", relevance: 0.7),
+        .init(type: .creation, template: "{subject}'s most famous song or album in {decade}? Answer with ONLY the title.", relevance: 0.85),
+        .init(type: .place, template: "The venue in {place} most associated with {subject}? Answer with ONLY the venue name.", relevance: 0.75),
+        .init(type: .event, template: "A major music event in {place} in {decade} connected to {subject}? Answer with ONLY the event name.", relevance: 0.65),
+        .init(type: .movement, template: "The music genre or movement {subject} was part of in {decade}? Answer with ONLY the genre name.", relevance: 0.6),
     ]
 
     // MARK: - Plain-Text Q&A Helpers
@@ -166,7 +166,8 @@ final class FoundationModelService: ObservationService {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Filter out guardrail refusals and chatbot disclaimers
-        let refusalPhrases = ["i can't assist", "i cannot", "i'm sorry", "as an ai", "i don't have"]
+        let refusalPhrases = ["i can't assist", "i cannot", "i'm sorry", "as an ai", "i don't have",
+                              "could you please", "i'd be happy", "however"]
         if refusalPhrases.contains(where: { text.lowercased().contains($0) }) {
             return nil
         }
@@ -186,7 +187,7 @@ final class FoundationModelService: ObservationService {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .trimmingCharacters(in: CharacterSet(charactersIn: "\"'."))
                 // Only use the extracted part if it's reasonably short (a name)
-                if !afterSep.isEmpty && afterSep.count < 60 {
+                if !afterSep.isEmpty && afterSep.count < 40 {
                     text = afterSep
                     break
                 }
@@ -203,6 +204,10 @@ final class FoundationModelService: ObservationService {
 
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"'."))
+
+        // Reject verbose responses — a clean name/title should be under 40 chars
+        if text.count > 40 { return nil }
+
         return text.isEmpty ? nil : text
     }
 
@@ -210,6 +215,102 @@ final class FoundationModelService: ObservationService {
     private func decadeString(for year: Int) -> String {
         let decade = (year / 10) * 10
         return "the \(decade)s"
+    }
+
+    /// Cascade fallback for subject resolution. Progressively broadens the query
+    /// until the FM returns a valid answer: decade ±10y → genre abstraction → broader region → decade again.
+    private func resolveSubjectWithCascade(
+        question: String,
+        fmLocation: String,
+        year: Int,
+        priorSubject: String? = nil
+    ) async -> String? {
+        // Step 1: Try original question
+        if let answer = await ask(question) {
+            print("[FM] Cascade: resolved on first try")
+            return answer
+        }
+
+        let decadeVal = (year / 10) * 10
+
+        // Step 2: Push decade ±10y
+        for offset in [10, -10] {
+            let altDecade = decadeVal + offset
+            guard altDecade >= 1920 && altDecade <= 2020 else { continue }
+            let altQuestion = "Which music artist FROM \(fmLocation) was most popular in the \(altDecade)s? Answer with ONLY the name."
+            if let answer = await ask(altQuestion) {
+                print("[FM] Cascade: resolved with decade \(altDecade)s")
+                return answer
+            }
+        }
+
+        // Step 3: If we have a prior subject, extract genre and try genre-based query
+        if let prior = priorSubject {
+            let genre = await ask("What music genre is \(prior) known for? Answer with ONLY the genre name.") ?? "popular music"
+            let genreQuestion = "Which \(genre) artist FROM \(fmLocation) was most popular in the \(decadeVal)s? Answer with ONLY the name."
+            if let answer = await ask(genreQuestion) {
+                print("[FM] Cascade: resolved with genre '\(genre)'")
+                return answer
+            }
+
+            // Step 4: Broaden region — strip to country-level if we have state, or try generic
+            let broadLocation = broadenLocation(fmLocation)
+            if broadLocation != fmLocation {
+                let broadQuestion = "Which \(genre) artist FROM \(broadLocation) was most popular in the \(decadeVal)s? Answer with ONLY the name."
+                if let answer = await ask(broadQuestion) {
+                    print("[FM] Cascade: resolved with broad location '\(broadLocation)'")
+                    return answer
+                }
+
+                // Step 5: Broader region + adjacent decade
+                for offset in [10, -10] {
+                    let altDecade = decadeVal + offset
+                    guard altDecade >= 1920 && altDecade <= 2020 else { continue }
+                    let finalQuestion = "Which \(genre) artist FROM \(broadLocation) was most popular in the \(altDecade)s? Answer with ONLY the name."
+                    if let answer = await ask(finalQuestion) {
+                        print("[FM] Cascade: resolved with broad location + decade \(altDecade)s")
+                        return answer
+                    }
+                }
+            }
+        }
+
+        print("[FM] Cascade: all attempts failed")
+        return nil
+    }
+
+    /// Broaden a location string: state → country, country → broader region.
+    private func broadenLocation(_ location: String) -> String {
+        // US states → "United States"
+        let usStates = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+            "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois",
+            "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland",
+            "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana",
+            "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York",
+            "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania",
+            "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah",
+            "Vermont", "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming"]
+        if usStates.contains(where: { location.localizedCaseInsensitiveContains($0) }) {
+            return "United States"
+        }
+
+        // Known country → region mappings for music
+        let regionMap: [String: String] = [
+            "South Korea": "Asia", "North Korea": "Asia", "Japan": "Asia",
+            "China": "Asia", "India": "Asia", "Thailand": "Asia",
+            "Nigeria": "Africa", "Ghana": "Africa", "South Africa": "Africa",
+            "Kenya": "Africa", "Ethiopia": "Africa", "Senegal": "Africa",
+            "Brazil": "South America", "Argentina": "South America",
+            "Colombia": "South America", "Mexico": "Latin America",
+            "Cuba": "Latin America", "Jamaica": "Caribbean",
+        ]
+        for (country, region) in regionMap {
+            if location.localizedCaseInsensitiveContains(country) {
+                return region
+            }
+        }
+
+        return location // can't broaden further
     }
 
     /// Fill template placeholders with actual values.
@@ -227,17 +328,21 @@ final class FoundationModelService: ObservationService {
         subjectQuestion: String,
         location: String,
         year: Int,
+        fmLocation: String? = nil,
         knownSubject: String? = nil,
+        priorSubject: String? = nil,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void
     ) async throws -> ClaudeResult {
         let start = CFAbsoluteTimeGetCurrent()
+        let resolvedFmLocation = fmLocation ?? location.components(separatedBy: ",").first?
+            .trimmingCharacters(in: .whitespaces) ?? location
 
         // Cancel any in-flight Tier 3 preloads — they compete for model inference
         preloadTask?.cancel()
         preloadTask = nil
         entityDetailCache.removeAll()
 
-        // Phase 1: Resolve subject via plain text Q&A
+        // Phase 1: Resolve subject via plain text Q&A with cascade fallback
         let subject: String
         if let known = knownSubject {
             subject = known
@@ -247,13 +352,19 @@ final class FoundationModelService: ObservationService {
             let decade = (year / 10) * 10
             var resolved: String?
 
-            if decade >= 2010, let discovered = await musicService?.discoverArtist(near: location.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? location) {
+            if decade >= 2010, let discovered = await musicService?.discoverArtist(near: resolvedFmLocation) {
                 resolved = discovered
                 print("[FM] Phase 1 (\(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - start))s) via MusicKit: \(discovered)")
             }
 
+            // Try FM with cascade fallback (decade ±10y → genre abstraction → broader region)
             if resolved == nil {
-                resolved = await ask(subjectQuestion)
+                resolved = await resolveSubjectWithCascade(
+                    question: subjectQuestion,
+                    fmLocation: resolvedFmLocation,
+                    year: year,
+                    priorSubject: priorSubject
+                )
                 if let r = resolved {
                     print("[FM] Phase 1 (\(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - start))s) via FM: \(r)")
                 }
@@ -287,11 +398,10 @@ final class FoundationModelService: ObservationService {
         emitUpdate()
 
         // Phase 2: Ask entity questions (sequential — model serializes inference anyway)
-        let city = location.components(separatedBy: ",").first?
-            .trimmingCharacters(in: .whitespaces) ?? location
+        let place = resolvedFmLocation
 
         for q in entityQuestions {
-            let question = fillTemplate(q.template, subject: subject, place: city, year: year)
+            let question = fillTemplate(q.template, subject: subject, place: place, year: year)
             if let answer = await ask(question) {
                 let displayName = String(answer.prefix(20)).uppercased()
                 // Skip duplicates — model sometimes repeats answers
@@ -320,7 +430,7 @@ final class FoundationModelService: ObservationService {
 
         // Phase 3: Get birth info and narrative
         let birthInfo = await ask("When was \(subject) born and where? Format: 'B. 1947, LONDON'. Just that.") ?? ""
-        let narrative = await ask("\(subject) in \(city), \(year). One sentence about why. Just the sentence.") ?? ""
+        let narrative = await ask("\(subject) in \(place), \(year). One sentence about why. Just the sentence.") ?? ""
 
         // Final result
         let artistTypes: Set<EntityType> = [.collaborator, .peer, .influence, .follower]
@@ -424,6 +534,15 @@ final class FoundationModelService: ObservationService {
         let location = [loc?.city, loc?.state, loc?.country].compactMap { $0 }.joined(separator: ", ")
         let year = signals.activeYear ?? Calendar.current.component(.year, from: .now)
 
+        // FM queries use broad location (state for US, country for international)
+        // to reduce hallucination on city-level questions
+        let fmLocation: String
+        if loc?.isoCountryCode == "US" {
+            fmLocation = loc?.state ?? location
+        } else {
+            fmLocation = loc?.country ?? location
+        }
+
         // Build Phase 1 question from signals
         let subjectQuestion: String
         var knownSubject: String? = nil
@@ -439,12 +558,12 @@ final class FoundationModelService: ObservationService {
             knownSubject = active
             subjectQuestion = ""
         } else {
-            subjectQuestion = "Name a famous \(decadeString(for: year)) musician from \(location)."
+            subjectQuestion = "Which music artist FROM \(fmLocation) was most popular in \(decadeString(for: year))? Answer with ONLY the name."
         }
 
         return try await generateCultureMap(
             subjectQuestion: subjectQuestion, location: location, year: year,
-            knownSubject: knownSubject, onUpdate: onUpdate
+            fmLocation: fmLocation, knownSubject: knownSubject, onUpdate: onUpdate
         )
     }
 
@@ -464,8 +583,7 @@ final class FoundationModelService: ObservationService {
         subject: String, year: Int, location: String,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        let city = location.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? location
-        let question = "Who is the closest cultural match to \(subject) from \(city) in \(decadeString(for: year))?"
+        let question = "Who is the music artist most connected to \(subject)'s legacy in \(decadeString(for: year))? Answer with ONLY the name."
         return try await generateCultureMap(
             subjectQuestion: question, location: location, year: year, onUpdate: onUpdate
         )
@@ -475,9 +593,28 @@ final class FoundationModelService: ObservationService {
         subject: String, subjectType: String, year: Int, location: String,
         onUpdate: @MainActor @Sendable (ClaudeResult) -> Void = { _ in }
     ) async throws -> ClaudeResult {
-        let question = "Who is the closest cultural analog to \(subject) FROM \(location)? Just the name."
+        // Extract genre from current subject — try the subjectType first, then ask FM, then default
+        var genre = subjectType
+        if genre.isEmpty || genre == "artist" {
+            // Ask FM for genre, using a neutral phrasing to avoid guardrails
+            genre = await ask("What music genre is most associated with \(subject)? Answer with ONLY the genre name.") ?? "popular music"
+        }
+
+        // Use broad location: last component (country) for international, or state for US-like strings
+        let components = location.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let fmLoc: String
+        if components.count >= 2 {
+            // Use second-to-last for countries with subdivisions, or last if only 2 parts
+            fmLoc = components.count >= 3 ? components[components.count - 1] : components.last ?? location
+        } else {
+            fmLoc = location
+        }
+
+        let question = "Which \(genre) artist FROM \(fmLoc) was most popular in \(decadeString(for: year))? Answer with ONLY the name."
+        print("[FM] Location change: \(subject) → \(genre) in \(fmLoc)")
         return try await generateCultureMap(
-            subjectQuestion: question, location: location, year: year, onUpdate: onUpdate
+            subjectQuestion: question, location: location, year: year,
+            fmLocation: fmLoc, priorSubject: subject, onUpdate: onUpdate
         )
     }
 
