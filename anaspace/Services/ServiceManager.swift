@@ -49,6 +49,7 @@ final class ServiceManager {
         shazam.audioService = audio
         soundAnalysis.audioService = audio
         speech.audioService = audio
+        claude.musicService = music
     }
 
     /// Call on app launch to sync permission state

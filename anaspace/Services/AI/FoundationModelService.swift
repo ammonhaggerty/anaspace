@@ -12,6 +12,9 @@ final class FoundationModelService: ObservationService {
     private var entityDetailCache: [String: EntityDetail] = [:]
     private var preloadTask: Task<Void, Never>?
 
+    /// Optional MusicKit service for current-decade artist discovery.
+    var musicService: MusicService?
+
     // MARK: - ObservationService
 
     func activate() async throws {
@@ -240,11 +243,26 @@ final class FoundationModelService: ObservationService {
             subject = known
             print("[FM] Phase 1 skipped — subject: \(known)")
         } else {
-            guard let resolved = await ask(subjectQuestion) else {
+            // For 2010s+, try MusicKit first — FM is weak on current music
+            let decade = (year / 10) * 10
+            var resolved: String?
+
+            if decade >= 2010, let discovered = await musicService?.discoverArtist(near: location.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? location) {
+                resolved = discovered
+                print("[FM] Phase 1 (\(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - start))s) via MusicKit: \(discovered)")
+            }
+
+            if resolved == nil {
+                resolved = await ask(subjectQuestion)
+                if let r = resolved {
+                    print("[FM] Phase 1 (\(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - start))s) via FM: \(r)")
+                }
+            }
+
+            guard let finalSubject = resolved else {
                 throw FoundationModelError.emptyResponse
             }
-            subject = resolved
-            print("[FM] Phase 1 (\(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - start))s): \(subject)")
+            subject = finalSubject
         }
 
         // Emit initial result with subject

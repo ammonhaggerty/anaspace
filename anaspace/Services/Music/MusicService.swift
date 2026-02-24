@@ -84,6 +84,26 @@ final class MusicService: ObservationService {
         }
     }
 
+    /// Discover a prominent artist associated with a location by searching the MusicKit catalog.
+    /// Returns the top artist name, or nil if unavailable.
+    func discoverArtist(near location: String) async -> String? {
+        guard isAuthorized else { return nil }
+
+        do {
+            var request = MusicCatalogSearchRequest(term: location, types: [Artist.self])
+            request.limit = 5
+
+            let response = try await request.response()
+            guard let artist = response.artists.first else { return nil }
+
+            print("[MusicKit] Discovered artist for \(location): \(artist.name)")
+            return artist.name
+        } catch {
+            print("[MusicKit] Artist discovery failed: \(error)")
+            return nil
+        }
+    }
+
     /// Look up a specific song by Apple Music ID and return its preview info.
     func getSongByID(_ appleMusicID: String) async -> TrackInfo? {
         guard isAuthorized else { return nil }
